@@ -5458,6 +5458,8 @@ int ObStaticEngineCG::generate_spec(ObLogSelectInto &op, ObSelectIntoSpec &spec,
   } else if (OB_FAIL(deep_copy_obj(alloc, op.get_closed_cht(), spec.closed_cht_))) {
   } else if (OB_FAIL(deep_copy_obj(alloc, op.get_escaped_cht(), spec.escaped_cht_))) {
   } else if (OB_FAIL(spec.external_properties_.store_str(op.get_external_properties()))) {
+  } else if (OB_FAIL(ob_write_string(alloc, op.get_copy_header_line(), spec.copy_header_line_))) {
+  } else if (OB_FAIL(ob_write_string(alloc, op.get_copy_nullstr(), spec.copy_nullstr_))) {
   } else if (OB_FAIL(spec.user_vars_.init(op.get_user_vars().count()))) {
   } else if (OB_FAIL(spec.select_exprs_.init(op.get_select_exprs().count()))) {
   } else {
@@ -5511,6 +5513,22 @@ int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFunctionTableSpec 
   } else {
     spec.has_correlated_expr_ = value_raw_expr->has_flag(CNT_DYNAMIC_PARAM);
     spec.value_expr_ = value_expr;
+    const TableItem *table_item = op.get_stmt()->get_table_item_by_id(op.get_table_id());
+    if (OB_ISNULL(table_item)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (table_item->file_sql_kind_ != 0) {
+      spec.file_sql_kind_ = table_item->file_sql_kind_;
+      OZ(ob_write_string(alloc, table_item->file_sql_path_, spec.file_sql_path_));
+      OZ(ob_write_string(alloc, table_item->file_sql_root_, spec.file_sql_root_));
+      spec.file_sql_header_ = table_item->file_sql_header_;
+      spec.file_sql_delimiter_ = table_item->file_sql_delimiter_;
+      spec.file_sql_quote_ = table_item->file_sql_quote_;
+      OZ(ob_write_string(alloc, table_item->file_sql_null_text_, spec.file_sql_null_text_));
+      spec.file_sql_size_ = table_item->file_sql_size_;
+      spec.file_sql_mtime_ = table_item->file_sql_mtime_;
+      spec.file_sql_device_ = table_item->file_sql_device_;
+      spec.file_sql_inode_ = table_item->file_sql_inode_;
+    }
     for (int64_t i = 0; OB_SUCC(ret) && i < op.get_output_exprs().count(); ++i) {
       if (OB_FAIL(mark_expr_self_produced(op.get_output_exprs().at(i)))) {
       }

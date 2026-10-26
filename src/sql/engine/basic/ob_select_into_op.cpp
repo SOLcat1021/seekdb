@@ -38,7 +38,7 @@ OB_SERIALIZE_MEMBER(ObSelectIntoOpInput, task_id_, sqc_id_);
 OB_SERIALIZE_MEMBER((ObSelectIntoSpec, ObOpSpec), into_type_, user_vars_, outfile_name_,
     field_str_, line_str_, closed_cht_, is_optional_, select_exprs_, is_single_, max_file_size_,
     escaped_cht_, cs_type_, parallel_, buffer_size_, is_overwrite_,
-    external_properties_);
+    external_properties_, copy_header_line_, copy_nullstr_);
 
 
 int ObSelectIntoOp::inner_open()
@@ -931,6 +931,10 @@ int ObSelectIntoOp::print_field(const ObObj &obj, ObCsvFileWriter &data_writer)
   }
   if (!has_escape_) {
     OZ(write_obj_to_file(obj, data_writer, false));
+  } else if (obj.is_null() && !MY_SPEC.copy_nullstr_.empty()) {
+    ObObj null_text;
+    null_text.set_varchar(MY_SPEC.copy_nullstr_);
+    OZ(write_obj_to_file(null_text, data_writer, false));
   } else if (obj.is_null()) {
     OZ(write_single_char_to_file(&char_escape_, data_writer));
     OZ(write_single_char_to_file(&char_n, data_writer));
@@ -1245,6 +1249,15 @@ int ObSelectIntoOp::create_the_only_data_writer(ObExternalFileWriter *&data_writ
     csv_data_writer = static_cast<ObCsvFileWriter*>(data_writer);
     if (OB_FAIL(csv_data_writer->alloc_buf(ctx_.get_allocator(), MY_SPEC.buffer_size_))) {
     }
+  }
+  if (OB_SUCC(ret) && !MY_SPEC.copy_header_line_.empty()) {
+    if (OB_ISNULL(csv_data_writer)) {
+      csv_data_writer = static_cast<ObCsvFileWriter*>(data_writer);
+    }
+    ObObj header;
+    header.set_varchar(MY_SPEC.copy_header_line_);
+    OZ(write_obj_to_file(header, *csv_data_writer, false));
+    OZ(csv_data_writer->flush_shared_buf(shared_buf_));
   }
   return ret;
 }
