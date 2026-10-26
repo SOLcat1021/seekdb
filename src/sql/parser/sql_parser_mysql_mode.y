@@ -8481,7 +8481,7 @@ file_sql_copy_options:
 file_sql_copy_option_list:
 file_sql_copy_option
 {
-  malloc_list_node($$, result->malloc_pool_, T_ARGUMENT_LIST, 2, 1, $1);
+  malloc_list_node($$, result->malloc_pool_, T_EXPR_LIST, 2, 1, $1);
 }
 | file_sql_copy_option_list ',' file_sql_copy_option
 {
@@ -17604,7 +17604,7 @@ file_sql_function '(' literal ')' %prec LOWER_PARENS
 file_sql_option_list:
 file_sql_option
 {
-  malloc_list_node($$, result->malloc_pool_, T_ARGUMENT_LIST, 2, 1, $1);
+  malloc_list_node($$, result->malloc_pool_, T_EXPR_LIST, 2, 1, $1);
 }
 | file_sql_option_list ',' file_sql_option
 {
