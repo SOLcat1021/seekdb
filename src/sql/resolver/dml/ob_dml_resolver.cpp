@@ -58,6 +58,18 @@ using namespace pl;
 
 namespace sql
 {
+namespace {
+std::string file_sql_utf8_path(const std::filesystem::path &path)
+{
+  const auto bytes = path.u8string();
+  return std::string(bytes.begin(), bytes.end());
+}
+std::filesystem::path file_sql_path_from_utf8(const std::string &bytes)
+{
+  return std::filesystem::path(std::u8string(bytes.begin(), bytes.end()));
+}
+}
+
 ObDMLResolver::ObDMLResolver(ObResolverParams &params)
     : ObStmtResolver(params),
       current_scope_(T_NONE_SCOPE),
@@ -4086,11 +4098,11 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
     }
     if (OB_SUCC(ret)) {
       std::error_code path_error;
-      const std::filesystem::path input_path = std::filesystem::u8path(supplied);
+      const std::filesystem::path input_path = file_sql_path_from_utf8(supplied);
       if (file_kind == 5) {
         const std::filesystem::path parent = input_path.has_parent_path() ?
             input_path.parent_path() : std::filesystem::path(".");
-        if (parent.string().find_first_of("*?") != std::string::npos ||
+        if (file_sql_utf8_path(parent).find_first_of("*?") != std::string::npos ||
             input_path.filename().empty()) {
           ret = OB_NOT_SUPPORTED;
         } else {
@@ -4098,7 +4110,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
           if (path_error) {
             ret = OB_FILE_NOT_EXIST;
           } else {
-            canonical_path = (directory / input_path.filename()).string();
+            canonical_path = file_sql_utf8_path(directory / input_path.filename());
           }
         }
       } else {
@@ -4106,7 +4118,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
         if (path_error) {
           ret = OB_FILE_NOT_EXIST;
         } else {
-          canonical_path = resolved.string();
+          canonical_path = file_sql_utf8_path(resolved);
         }
       }
     }
@@ -4167,9 +4179,9 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
       ret = OB_ERR_NO_PRIVILEGE;
     } else {
       const std::filesystem::path root =
-          std::filesystem::canonical(std::filesystem::u8path(root_text), path_error);
-      if (!path_error) canonical_root = root.string();
-      const std::filesystem::path file = std::filesystem::u8path(canonical_path);
+          std::filesystem::canonical(file_sql_path_from_utf8(root_text), path_error);
+      if (!path_error) canonical_root = file_sql_utf8_path(root);
+      const std::filesystem::path file = file_sql_path_from_utf8(canonical_path);
       auto root_part = root.begin();
       auto file_part = file.begin();
       for (; !path_error && root_part != root.end(); ++root_part, ++file_part) {
@@ -4177,8 +4189,8 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
           ret = OB_ERR_NO_PRIVILEGE;
           break;
         }
-        std::string expected = root_part->string();
-        std::string actual = file_part->string();
+        std::string expected = file_sql_utf8_path(*root_part);
+        std::string actual = file_sql_utf8_path(*file_part);
 #ifdef _WIN32
         std::transform(expected.begin(), expected.end(), expected.begin(), [](unsigned char ch) {
           return static_cast<char>(std::tolower(ch));

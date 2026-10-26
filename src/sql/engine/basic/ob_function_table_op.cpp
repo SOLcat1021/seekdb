@@ -35,6 +35,16 @@ namespace sql
 {
 namespace {
 
+std::string file_sql_utf8_path(const std::filesystem::path &path)
+{
+  const auto bytes = path.generic_u8string();
+  return std::string(bytes.begin(), bytes.end());
+}
+std::filesystem::path file_sql_path_from_utf8(const std::string &bytes)
+{
+  return std::filesystem::path(std::u8string(bytes.begin(), bytes.end()));
+}
+
 bool glob_match(const std::string &pattern, const std::string &name)
 {
   size_t p = 0, n = 0, star = std::string::npos, retry = 0;
@@ -61,8 +71,8 @@ bool path_under_root(const std::filesystem::path &path, const std::filesystem::p
   auto part = path.begin();
   for (auto required = root.begin(); required != root.end(); ++required, ++part) {
     if (part == path.end()) return false;
-    std::string expected = required->string();
-    std::string actual = part->string();
+    std::string expected = file_sql_utf8_path(*required);
+    std::string actual = file_sql_utf8_path(*part);
 #ifdef _WIN32
     std::transform(expected.begin(), expected.end(), expected.begin(), [](unsigned char ch) {
       return static_cast<char>(std::tolower(ch));
@@ -119,9 +129,9 @@ int ObFunctionTableOp::inner_open()
   } else if (MY_SPEC.file_sql_kind_ == 5) {
     std::string pattern_text(MY_SPEC.file_sql_path_.ptr(), MY_SPEC.file_sql_path_.length());
     std::string root_text(MY_SPEC.file_sql_root_.ptr(), MY_SPEC.file_sql_root_.length());
-    const std::filesystem::path pattern_path = std::filesystem::u8path(pattern_text);
-    const std::filesystem::path root = std::filesystem::u8path(root_text);
-    std::string pattern = pattern_path.filename().string();
+    const std::filesystem::path pattern_path = file_sql_path_from_utf8(pattern_text);
+    const std::filesystem::path root = file_sql_path_from_utf8(root_text);
+    std::string pattern = file_sql_utf8_path(pattern_path.filename());
     std::error_code error;
     std::filesystem::directory_iterator entry(pattern_path.parent_path(), error);
     glob_paths_.clear();
@@ -132,7 +142,7 @@ int ObFunctionTableOp::inner_open()
     for (; OB_SUCC(ret) && entry != std::filesystem::directory_iterator(); entry.increment(error)) {
       if (error) {
         ret = OB_ERR_PARSE_SQL;
-      } else if (glob_match(pattern, entry->path().filename().string())) {
+      } else if (glob_match(pattern, file_sql_utf8_path(entry->path().filename()))) {
         const std::filesystem::path found = std::filesystem::canonical(entry->path(), error);
         if (error) {
           ret = OB_ERR_PARSE_SQL;
@@ -142,7 +152,7 @@ int ObFunctionTableOp::inner_open()
           if (glob_paths_.size() >= 10000) {
             ret = OB_NOT_SUPPORTED;
           } else {
-            glob_paths_.push_back(found.generic_string());
+            glob_paths_.push_back(file_sql_utf8_path(found));
           }
         }
       }

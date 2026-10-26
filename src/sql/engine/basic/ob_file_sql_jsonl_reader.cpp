@@ -3,6 +3,7 @@
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <sys/stat.h>
@@ -12,6 +13,26 @@ namespace oceanbase {
 namespace sql {
 namespace file_sql {
 namespace {
+
+std::filesystem::path file_path_from_utf8(const std::string &bytes)
+{
+  return std::filesystem::path(std::u8string(bytes.begin(), bytes.end()));
+}
+
+#ifdef _WIN32
+using FileStat = struct _stat64;
+bool file_stat(const std::string &path, FileStat &info)
+{
+  return _wstat64(file_path_from_utf8(path).c_str(), &info) == 0 &&
+         (info.st_mode & _S_IFMT) == _S_IFREG;
+}
+#else
+using FileStat = struct stat;
+bool file_stat(const std::string &path, FileStat &info)
+{
+  return ::stat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode);
+}
+#endif
 
 constexpr size_t MAX_LINE_BYTES = 16 * 1024 * 1024;
 constexpr size_t MAX_COLUMNS = 4096;
@@ -29,8 +50,8 @@ std::string ascii_lower(const std::string &value)
 
 bool JsonlReader::capture_identity(std::string &error)
 {
-  struct stat info;
-  if (::stat(path_.c_str(), &info) != 0 || !S_ISREG(info.st_mode)) {
+  FileStat info;
+  if (!file_stat(path_, info)) {
     error = "JSONL path is not a readable regular file: " + path_;
     return false;
   }
@@ -46,8 +67,8 @@ bool JsonlReader::capture_identity(std::string &error)
 
 bool JsonlReader::check_unchanged(std::string &error) const
 {
-  struct stat info;
-  if (::stat(path_.c_str(), &info) != 0 || !S_ISREG(info.st_mode) ||
+  FileStat info;
+  if (!file_stat(path_, info) ||
       static_cast<int64_t>(info.st_size) != file_size_ ||
       static_cast<uint64_t>(info.st_dev) != file_device_ ||
       static_cast<uint64_t>(info.st_ino) != file_inode_
@@ -67,7 +88,7 @@ bool JsonlReader::open_stream(std::string &error)
 {
   stream_.close();
   stream_.clear();
-  stream_.open(path_.c_str(), std::ios::in | std::ios::binary);
+  stream_.open(file_path_from_utf8(path_), std::ios::in | std::ios::binary);
   if (!stream_) {
     error = "Cannot open JSONL file: " + path_;
     return false;

@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <limits>
 #include <sys/stat.h>
 #include <unordered_set>
@@ -11,6 +12,26 @@ namespace oceanbase {
 namespace sql {
 namespace file_sql {
 namespace {
+
+std::filesystem::path file_path_from_utf8(const std::string &bytes)
+{
+  return std::filesystem::path(std::u8string(bytes.begin(), bytes.end()));
+}
+
+#ifdef _WIN32
+using FileStat = struct _stat64;
+bool file_stat(const std::string &path, FileStat &info)
+{
+  return _wstat64(file_path_from_utf8(path).c_str(), &info) == 0 &&
+         (info.st_mode & _S_IFMT) == _S_IFREG;
+}
+#else
+using FileStat = struct stat;
+bool file_stat(const std::string &path, FileStat &info)
+{
+  return ::stat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode);
+}
+#endif
 
 std::string ascii_lower(const std::string &value)
 {
@@ -127,8 +148,8 @@ CsvType widen_csv_type(CsvType previous, CsvType next)
 
 bool CsvReader::capture_identity(std::string &error)
 {
-  struct stat info;
-  if (::stat(path_.c_str(), &info) != 0 || !S_ISREG(info.st_mode)) {
+  FileStat info;
+  if (!file_stat(path_, info)) {
     error = "CSV path is not a readable regular file: " + path_;
     return false;
   }
@@ -144,8 +165,8 @@ bool CsvReader::capture_identity(std::string &error)
 
 bool CsvReader::check_unchanged(std::string &error) const
 {
-  struct stat info;
-  if (::stat(path_.c_str(), &info) != 0 || !S_ISREG(info.st_mode) ||
+  FileStat info;
+  if (!file_stat(path_, info) ||
       static_cast<int64_t>(info.st_size) != file_size_ ||
       static_cast<uint64_t>(info.st_dev) != file_device_ ||
       static_cast<uint64_t>(info.st_ino) != file_inode_
@@ -165,7 +186,7 @@ bool CsvReader::open_stream(std::string &error)
 {
   stream_.close();
   stream_.clear();
-  stream_.open(path_.c_str(), std::ios::in | std::ios::binary);
+  stream_.open(file_path_from_utf8(path_), std::ios::in | std::ios::binary);
   if (!stream_) {
     error = "Cannot open CSV file: " + path_;
     return false;

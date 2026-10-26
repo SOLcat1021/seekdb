@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -56,6 +57,20 @@ int main(int argc, char **argv)
   write_file(path, "{broken}\n");
   assert(reader.open(path, error));
   assert(!reader.infer_schema(error) && error.find("Invalid JSON") != std::string::npos);
+
+  const std::string unicode_path = path + "-\xE9\x99\x88.jsonl";
+  {
+    const std::u8string utf8(unicode_path.begin(), unicode_path.end());
+    std::ofstream file(std::filesystem::path(utf8), std::ios::binary);
+    file << "{\"id\":1}\n";
+    assert(file.good());
+  }
+  assert(reader.open(unicode_path, error));
+  assert(reader.infer_schema(error));
+  assert(reader.next(values, is_null, end, error) && values[0] == "1");
+  reader.close();
+  std::filesystem::remove(std::filesystem::path(
+      std::u8string(unicode_path.begin(), unicode_path.end())));
 
   std::remove(path.c_str());
   return 0;

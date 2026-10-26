@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -85,6 +86,20 @@ int main(int argc, char **argv)
   limited.max_record_bytes = 3;
   assert(reader.open(path, limited, error));
   assert(!reader.infer_schema(error) && error.find("size limit") != std::string::npos);
+
+  const std::string unicode_path = path + "-\xE9\x99\x88.csv";
+  {
+    const std::u8string utf8(unicode_path.begin(), unicode_path.end());
+    std::ofstream file(std::filesystem::path(utf8), std::ios::binary);
+    file << "id\n1\n";
+    assert(file.good());
+  }
+  assert(reader.open(unicode_path, CsvOptions(), error));
+  assert(reader.infer_schema(error));
+  assert(reader.next(values, is_null, end, error) && values[0] == "1");
+  reader.close();
+  std::filesystem::remove(std::filesystem::path(
+      std::u8string(unicode_path.begin(), unicode_path.end())));
 
   std::remove(path.c_str());
   return 0;
