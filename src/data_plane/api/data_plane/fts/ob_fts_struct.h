@@ -62,9 +62,6 @@ private:
   static const uint64_t AWF_STOPWORD     = 1 << 1; // filter by sotp word table.
   static const uint64_t AWF_CASEDOWN     = 1 << 2; // convert characters from uppercase to lowercase.
   static const uint64_t AWF_GROUPBY_WORD = 1 << 3; // distinct and word aggregation
-  // Parser tokens may only remain valid until the next iterator call. Persist
-  // a copy when such a token is first stored in the word map.
-  static const uint64_t AWF_TRANSIENT_WORD = 1 << 4;
 public:
   ObAddWordFlag() : flag_(AWF_NONE) {}
   ~ObAddWordFlag() = default;
@@ -78,7 +75,6 @@ public:
   void set_stop_word() { set_flag(AWF_STOPWORD); }
   void set_casedown() { set_flag(AWF_CASEDOWN); }
   void set_groupby_word() { set_flag(AWF_GROUPBY_WORD); }
-  void set_transient_word() { set_flag(AWF_TRANSIENT_WORD); }
   void clear() { flag_ = AWF_NONE; }
   void clear_min_max_word() { clear_flag(AWF_MIN_MAX_WORD); }
   void clear_stop_word() { clear_flag(AWF_STOPWORD); }
@@ -88,7 +84,6 @@ public:
   bool stopword() const { return has_flag(AWF_STOPWORD); }
   bool casedown() const { return has_flag(AWF_CASEDOWN); }
   bool groupby_word() const { return has_flag(AWF_GROUPBY_WORD); }
-  bool transient_word() const { return has_flag(AWF_TRANSIENT_WORD); }
   TO_STRING_KV(K_(flag));
 private:
   uint64_t flag_;

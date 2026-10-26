@@ -205,15 +205,7 @@ int ObAddWord::groupby_word(const ObFTWord &word, const int64_t word_freq)
   if (OB_UNLIKELY(word.empty() || word_freq <= 0)) {
     ret = OB_INVALID_ARGUMENT;
   } else if (!flag_.groupby_word()) {
-    if (flag_.transient_word()) {
-      common::ObString copied_word;
-      if (OB_FAIL(common::ob_write_string(allocator_, word.get_word().get_string(), copied_word))) {
-      } else {
-        ObFTWord stored_word(copied_word.length(), copied_word.ptr(), word_meta_);
-        if (OB_FAIL(word_map_.set_refactored(stored_word, 1/*word count*/))) {
-        }
-      }
-    } else if (OB_FAIL(word_map_.set_refactored(word, 1/*word count*/))) {
+    if (OB_FAIL(word_map_.set_refactored(word, 1/*word count*/))) {
     }
   } else if (OB_FAIL(word_map_.get_refactored(word, word_count)) && OB_HASH_NOT_EXIST != ret) {
   } else {
@@ -222,15 +214,7 @@ int ObAddWord::groupby_word(const ObFTWord &word, const int64_t word_freq)
     } else {
       word_count += word_freq;
     }
-    if (flag_.transient_word() && OB_HASH_NOT_EXIST == ret) {
-      common::ObString copied_word;
-      if (OB_FAIL(common::ob_write_string(allocator_, word.get_word().get_string(), copied_word))) {
-      } else {
-        ObFTWord stored_word(copied_word.length(), copied_word.ptr(), word_meta_);
-        if (OB_FAIL(word_map_.set_refactored(stored_word, word_count, 1/*overwrite*/))) {
-        }
-      }
-    } else if (OB_FAIL(word_map_.set_refactored(word, word_count, 1/*overwrite*/))) {
+    if (OB_FAIL(word_map_.set_refactored(word, word_count, 1/*overwrite*/))) {
     }
   }
   return ret;
