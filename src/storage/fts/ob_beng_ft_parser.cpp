@@ -35,7 +35,6 @@ int ObBEngFTParser::get_next_token(
   int ret = OB_SUCCESS;
   ObDatum token;
   int64_t token_freq = 0;
-  char *buf = nullptr;
   word = nullptr;
   word_len = 0;
   char_len = 0;
@@ -49,11 +48,10 @@ int ObBEngFTParser::get_next_token(
     }
   } else if (OB_ISNULL(token.ptr_) || OB_UNLIKELY(0 >= token.len_ || 0 >= token_freq)) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (OB_ISNULL(buf = static_cast<char *>(allocator_.alloc(token.len_)))) {
-    ret = OB_ALLOCATE_MEMORY_FAILED;
   } else {
-    MEMCPY(buf, token.ptr_, token.len_);
-    word = buf;
+    // ObAddWord consumes this result before the next iterator call. It copies
+    // a transient word only when the word is first retained in its map.
+    word = token.ptr_;
     word_len = token.len_;
     char_len = token.len_;
     word_freq = token_freq;
@@ -76,7 +74,7 @@ int ObBEngFTParser::init(ObFTParserParam *param)
     analysis_ctx_.cs_ = param->cs_;
     analysis_ctx_.filter_stopword_ = false;
     analysis_ctx_.need_grouping_ = false;
-    if (OB_FAIL(english_analyzer_.init(analysis_ctx_, *param->allocator_))) {
+    if (OB_FAIL(english_analyzer_.init(analysis_ctx_, allocator_))) {
     } else if (OB_FAIL(segment(doc_, token_stream_))) {
     } else if (OB_ISNULL(token_stream_)) {
       ret = OB_ERR_UNEXPECTED;
@@ -155,6 +153,7 @@ int ObBasicEnglishFTParserDesc::get_add_word_flag(ObAddWordFlag &flag) const
   flag.set_min_max_word();
   flag.set_stop_word();
   flag.set_groupby_word();
+  flag.set_transient_word();
   return ret;
 }
 
