@@ -31,6 +31,19 @@ endif()
 
 option(OB_ENABLE_STANDBY "Build physical standby support" ON)
 option(ENABLE_SANITY "Build with seekdb memory Sanity instrumentation" OFF)
+option(OB_ENABLE_HIPVS_HNSW "Build the optional hipVS HNSW construction tool" OFF)
+
+# hipVS is a ROCm/Linux dependency and is intentionally opt-in. The server's
+# persisted vector-index format is owned by vsag, so this tool stays separate
+# until a format-compatible import path is available. Normal CPU builds neither
+# need ROCm nor a GPU runtime.
+if(OB_ENABLE_HIPVS_HNSW)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "OB_ENABLE_HIPVS_HNSW is supported only on Linux with ROCm/hipVS")
+  endif()
+  find_package(cuvs CONFIG REQUIRED)
+  add_subdirectory(tools/hipvs_hnsw EXCLUDE_FROM_ALL)
+endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(SEEKDB_GENERATED_ROOT "${CMAKE_BINARY_DIR}/generated")
