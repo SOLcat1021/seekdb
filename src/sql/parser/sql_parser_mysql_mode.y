@@ -513,6 +513,7 @@ END_P SET_VAR DELIMITER
 %type <node> es_sql_opt
 %type <node> hybrid_search_expr hybrid_search_param
 %type <node> file_sql_function file_sql_table_expr file_sql_option file_sql_option_list
+%type <node> file_sql_copy_stmt file_sql_copy_option file_sql_copy_options file_sql_copy_option_list
 %type <node> vector_similarity_expr vector_similarity_metric
 %type <node> algorithm_opt lock_opt
 %type <node> flush_privileges_stmt opt_flush_privileges_scope
@@ -557,6 +558,8 @@ opt_end_p:
 
 /* only preparable statement will set question mark size */
 stmt:
+    file_sql_copy_stmt { $$ = $1; question_mark_issue($$, result); }
+  |
     select_stmt             { $$ = $1; question_mark_issue($$, result); }
   | insert_stmt             { $$ = $1; question_mark_issue($$, result); }
   | create_table_stmt       {
@@ -8452,6 +8455,57 @@ select_no_parens opt_when
 | with_select
 {
   $$ = $1;
+}
+;
+
+file_sql_copy_stmt:
+COPY '(' select_no_parens ')' TO STRING_VALUE file_sql_copy_options
+{
+  $$ = $3;
+  if ($$->children_[PARSE_SELECT_INTO] != NULL ||
+      $$->children_[PARSE_SELECT_INTO_EXTRA] != NULL) {
+    yyerror(&@1, result, "COPY query cannot contain INTO");
+    YYERROR;
+  } else {
+    malloc_non_terminal_node($$->children_[PARSE_SELECT_INTO_EXTRA], result->malloc_pool_,
+                             T_INTO_OUTFILE, 6, $6, NULL, NULL, NULL, NULL, $7);
+  }
+}
+;
+
+file_sql_copy_options:
+/* empty */ { $$ = NULL; }
+| '(' file_sql_copy_option_list ')' { $$ = $2; }
+;
+
+file_sql_copy_option_list:
+file_sql_copy_option
+{
+  malloc_list_node($$, result->malloc_pool_, T_ARGUMENT_LIST, 2, 1, $1);
+}
+| file_sql_copy_option_list ',' file_sql_copy_option
+{
+  push_back_list(result->malloc_pool_, result, $$, $1, $3);
+}
+;
+
+file_sql_copy_option:
+FORMAT NAME_OB
+{
+  ParseNode *name = NULL;
+  get_non_reserved_node(name, result->malloc_pool_, @1.first_column, @1.last_column);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, name, $2);
+}
+| NAME_OB STRING_VALUE
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, $1, $2);
+}
+| NAME_OB
+{
+  ParseNode *value = NULL;
+  malloc_terminal_node(value, result->malloc_pool_, T_BOOL);
+  value->value_ = 1;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, $1, value);
 }
 ;
 
@@ -17559,11 +17613,11 @@ file_sql_option
 ;
 
 file_sql_option:
-NAME_OB '=' simple_expr
+NAME_OB COMP_EQ simple_expr
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, $1, $3);
 }
-| FORMAT '=' simple_expr
+| FORMAT COMP_EQ simple_expr
 {
   get_non_reserved_node($$, result->malloc_pool_, @1.first_column, @1.last_column);
   ParseNode *name = $$;

@@ -128,7 +128,9 @@ struct ObSelectIntoItem
         max_file_size_(DEFAULT_MAX_FILE_SIZE),
         escaped_cht_(),
         buffer_size_(DEFAULT_BUFFER_SIZE),
-        external_properties_()
+        external_properties_(),
+        copy_header_line_(),
+        copy_nullstr_()
   {
     field_str_.set_varchar(DEFAULT_FIELD_TERM_STR);
     field_str_.set_collation_type(ObCharset::get_system_collation());
@@ -155,6 +157,8 @@ struct ObSelectIntoItem
     cs_type_ = other.cs_type_;
     buffer_size_ = other.buffer_size_;
     external_properties_ = other.external_properties_;
+    copy_header_line_ = other.copy_header_line_;
+    copy_nullstr_ = other.copy_nullstr_;
     return user_vars_.assign(other.user_vars_);
   }
   int deep_copy(ObIAllocator &allocator,
@@ -186,6 +190,8 @@ struct ObSelectIntoItem
   common::ObCollationType cs_type_;
   int64_t buffer_size_;
   common::ObString external_properties_;
+  common::ObString copy_header_line_;
+  common::ObString copy_nullstr_;
 
   static const char* const DEFAULT_FIELD_TERM_STR;
   static const char* const DEFAULT_LINE_TERM_STR;
