@@ -26,6 +26,8 @@ INSERT INTO memo (title, body) VALUES ('Sales Report', 'Sales have increased by 
 select tokenize('lowercase', 'beng') as lower_token;
 select tokenize('UPPERCASE', 'beng') as upper_token;
 select tokenize('alpha alpha', 'beng') as repeated_token;
+select tokenize('café', 'beng') as accented_token;
+select tokenize('ÉCOLE', 'beng') as folded_accented_token;
 
 --result_format 4
 

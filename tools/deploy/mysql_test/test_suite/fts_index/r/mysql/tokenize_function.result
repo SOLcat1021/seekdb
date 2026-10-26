@@ -20,6 +20,12 @@ upper_token
 select tokenize('alpha alpha', 'beng') as repeated_token;
 repeated_token
 ["alpha"]
+select tokenize('café', 'beng') as accented_token;
+accented_token
+["café"]
+select tokenize('ÉCOLE', 'beng') as folded_accented_token;
+folded_accented_token
+["école"]
 result_format: 4
 
 select tokenize('hello world');
