@@ -41,6 +41,65 @@ using namespace share;
 using namespace obcall;
 namespace sql
 {
+namespace
+{
+int parse_ai_column_options(ParseNode *node,
+                            int64_t &max_retries,
+                            bool &has_sync_mode,
+                            bool &has_max_retries)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(node)) {
+  } else if (T_LINK_NODE == node->type_ && 2 == node->num_child_) {
+    if (OB_FAIL(parse_ai_column_options(node->children_[0], max_retries, has_sync_mode, has_max_retries))) {
+    } else if (OB_FAIL(parse_ai_column_options(node->children_[1], max_retries, has_sync_mode, has_max_retries))) {
+    }
+  } else if (T_AI_COLUMN_OPTION != node->type_ || 2 != node->num_child_
+             || OB_ISNULL(node->children_[0]) || OB_ISNULL(node->children_[1])) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    ParseNode *key_node = node->children_[0];
+    ParseNode *value_node = node->children_[1];
+    const ObString key(key_node->str_len_, key_node->str_value_);
+    if (ObString("sync_mode").case_compare(key) == 0) {
+      if (has_sync_mode || T_VARCHAR != value_node->type_) {
+        ret = OB_ERR_PARSER_SYNTAX;
+      } else {
+        has_sync_mode = true;
+        const ObString value(value_node->str_len_, value_node->str_value_);
+        if (ObString("async").case_compare(value) != 0) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "only asynchronous AI columns are supported");
+        }
+      }
+    } else if (ObString("max_retries").case_compare(key) == 0) {
+      if (has_max_retries || T_INT != value_node->type_
+          || value_node->value_ < 0 || value_node->value_ > 100) {
+        ret = OB_ERR_PARSER_SYNTAX;
+      } else {
+        has_max_retries = true;
+        max_retries = static_cast<int64_t>(value_node->value_);
+      }
+    } else {
+      ret = OB_ERR_PARSER_SYNTAX;
+    }
+  }
+  return ret;
+}
+
+int parse_ai_column_options(ParseNode *node, int64_t &max_retries)
+{
+  int ret = OB_SUCCESS;
+  bool has_sync_mode = false;
+  bool has_max_retries = false;
+  max_retries = 3;
+  if (OB_FAIL(parse_ai_column_options(node, max_retries, has_sync_mode, has_max_retries))) {
+  }
+  return ret;
+}
+
+}
+
 ObDDLResolver::ObDDLResolver(ObResolverParams &params)
   : ObStmtResolver(params),
     block_size_(OB_DEFAULT_SSTABLE_BLOCK_SIZE),
@@ -2254,6 +2313,11 @@ int ObDDLResolver::resolve_normal_column_attribute(ObColumnSchemaV2 &column,
         }
         break;
       }
+      case T_AI_COLUMN: {
+        if (OB_FAIL(resolve_ai_column_attribute(column, attr_node, is_modify_column))) {
+        }
+        break;
+      }
       case T_COLLATION: {
         if (column.is_string_type() || column.is_enum_or_set()) {
           //To compat with mysql, only check here.
@@ -2332,6 +2396,69 @@ int ObDDLResolver::resolve_normal_column_attribute(ObColumnSchemaV2 &column,
           LOG_USER_ERROR(OB_ERR_COLUMN_SPEC, column.get_column_name_str().length(),
                         column.get_column_name_str().ptr());
           SQL_RESV_LOG(WARN, "wrong column type for auto_increment", K(ret));
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+int ObDDLResolver::resolve_ai_column_attribute(ObColumnSchemaV2 &column,
+                                               ParseNode *attr_node,
+                                               const bool is_modify_column)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(attr_node) || T_AI_COLUMN != attr_node->type_ || 2 != attr_node->num_child_
+      || OB_ISNULL(attr_node->children_[0])) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (is_modify_column) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "modifying AI column definitions");
+  } else {
+    ParseNode *expr_node = attr_node->children_[0];
+    const bool is_generic_function = T_FUN_SYS == expr_node->type_
+                                    && 2 == expr_node->num_child_
+                                    && OB_NOT_NULL(expr_node->children_[0])
+                                    && OB_NOT_NULL(expr_node->children_[1]);
+    const ObString func_name = is_generic_function
+        ? ObString(expr_node->children_[0]->str_len_, expr_node->children_[0]->str_value_)
+        : ObString();
+    const bool is_complete = T_FUN_SYS_AI_COMPLETE == expr_node->type_
+        || (is_generic_function && 0 == func_name.case_compare("ai_complete"));
+    const bool is_embed = T_FUN_SYS_AI_EMBED == expr_node->type_
+        || (is_generic_function && 0 == func_name.case_compare("ai_embed"));
+    ParseNode *args_node = is_generic_function ? expr_node->children_[1] : nullptr;
+    int64_t max_retries = 3;
+    if (!is_complete && !is_embed) {
+      ret = OB_ERR_PARSER_SYNTAX;
+    } else if (is_generic_function && (OB_ISNULL(args_node) || T_EXPR_LIST != args_node->type_)) {
+      ret = OB_ERR_PARSER_SYNTAX;
+    } else if (is_embed && ObVectorType != column.get_data_type()) {
+      ret = OB_ERR_INVALID_TYPE_FOR_OP;
+      LOG_USER_ERROR(OB_ERR_INVALID_TYPE_FOR_OP);
+    } else if (is_embed && is_generic_function && 3 == args_node->num_child_
+               && OB_NOT_NULL(args_node->children_[2]) && T_INT == args_node->children_[2]->type_
+               && args_node->children_[2]->value_ != column.get_accuracy().get_length()) {
+      ret = OB_ERR_INVALID_VECTOR_DIM;
+      LOG_USER_ERROR(OB_ERR_INVALID_VECTOR_DIM,
+                     static_cast<uint32_t>(column.get_accuracy().get_length()),
+                     static_cast<uint32_t>(args_node->children_[2]->value_));
+    } else if (OB_FAIL(parse_ai_column_options(attr_node->children_[1], max_retries))) {
+    } else {
+      ObString expr;
+      if (expr_node->str_value_ != nullptr && expr_node->str_len_ > 0) {
+        expr.assign_ptr(expr_node->str_value_, static_cast<int32_t>(expr_node->str_len_));
+      } else {
+        ret = OB_ERR_PARSER_SYNTAX;
+      }
+      if (OB_SUCC(ret) && column.is_generated_column()) {
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED, "AI columns cannot be generated columns");
+      }
+      if (OB_SUCC(ret)) {
+        column.set_is_ai_column(true);
+        column.set_ai_column_max_retries(max_retries);
+        if (OB_FAIL(column.set_ai_column_expr(expr))) {
         }
       }
     }

@@ -342,7 +342,12 @@ all_column_def = dict(
       ('sub_data_type', 'int', 'false', '0'),
       ('skip_index_attr', 'int', 'false', '0'),
       ('lob_chunk_size', 'int', 'false', 'OB_DEFAULT_LOB_CHUNK_SIZE'),
-      ('local_session_vars', 'longtext', 'true')
+      ('local_session_vars', 'longtext', 'true'),
+      ('ai_column_expr', 'longtext', 'true'),
+      ('ai_column_max_retries', 'int', 'false', '0'),
+      ('ai_column_state_column_id', 'int', 'false', '-1'),
+      ('ai_column_request_column_id', 'int', 'false', '-1'),
+      ('ai_column_result_spec_column_id', 'int', 'false', '-1')
   ]
   )
 
@@ -2446,7 +2451,6 @@ all_ai_model_endpoint_def = dict(
 )
 def_table_schema(**all_ai_model_endpoint_def)
 
-
 all_objauth_mysql_def = dict(
     owner = 'cjl476581',
     table_name     = '__all_objauth_mysql',
@@ -2466,6 +2470,28 @@ all_objauth_mysql_def = dict(
   )
 def_table_schema(**all_objauth_mysql_def)
 def_table_schema(**gen_history_table_def(1134, all_objauth_mysql_def))
+
+all_ai_column_task_def = dict(
+    owner = 'shenyunlong.syl',
+    table_name = '__all_ai_column_task',
+    table_id = '1135',
+    table_type = 'SYSTEM_TABLE',
+    gm_columns = ['gmt_create', 'gmt_modified'],
+    meta_record_in_sys = False,
+    rowkey_columns = [
+      ('table_id', 'int'),
+      ('column_id', 'int'),
+      ('rowkey_predicate', 'varchar:2048')
+    ],
+    normal_columns = [
+      ('request_id', 'int', 'false'),
+      ('state', 'int', 'false', '1'),
+      ('retry_count', 'int', 'false', '0'),
+      ('eligible_ts', 'timestamp:6', 'false')
+    ]
+)
+
+def_table_schema(**all_ai_column_task_def)
 
 
 # Reserved position (placeholder before this line)
@@ -13821,6 +13847,35 @@ def_table_schema(
       REQUEST_TRANSFORM_FN,
       RESPONSE_TRANSFORM_FN
     FROM oceanbase.__all_ai_model_endpoint WHERE ENDPOINT_ID != -1;
+  """.replace("\n", " ")
+)
+
+def_table_schema(
+  owner           = 'shenyunlong.syl',
+  database_id     = 'OB_SYS_DATABASE_ID',
+  table_name      = '__all_ai_column',
+  table_id        = '21665',
+  table_type      = 'SYSTEM_VIEW',
+  rowkey_columns  = [],
+  normal_columns  = [],
+  gm_columns      = [],
+  view_definition = """
+    SELECT
+      c.table_id AS TABLE_ID,
+      c.column_id AS COLUMN_ID,
+      c.column_name AS COLUMN_NAME,
+      c.ai_column_max_retries AS MAX_RETRIES,
+      CASE WHEN c.data_type = 36
+        THEN CONCAT(c.ai_column_expr, ' Return exactly one valid JSON value')
+        ELSE c.ai_column_expr
+      END AS NORMALIZED_EXPR,
+      c.ai_column_state_column_id AS STATE_COLUMN_ID,
+      c.ai_column_request_column_id AS REQUEST_COLUMN_ID,
+      c.ai_column_result_spec_column_id AS RESULT_SPEC_COLUMN_ID
+    FROM oceanbase.__all_column c
+    JOIN oceanbase.__all_table t ON t.table_id = c.table_id
+    WHERE (c.column_flags & 32) <> 0
+      AND t.table_type = 3
   """.replace("\n", " ")
 )
 

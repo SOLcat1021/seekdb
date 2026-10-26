@@ -35,6 +35,26 @@ using namespace share::schema;
 using namespace omt;
 namespace sql
 {
+namespace
+{
+bool has_ai_column_reference(ParseNode *node, const ObTableSchema &table_schema)
+{
+  bool found = false;
+  if (OB_NOT_NULL(node)) {
+    if (T_COLUMN_REF == node->type_ && 3 == node->num_child_ && OB_NOT_NULL(node->children_[2])
+        && T_IDENT == node->children_[2]->type_) {
+      const ObString name(node->children_[2]->str_len_, node->children_[2]->str_value_);
+      const ObColumnSchemaV2 *referenced_column = table_schema.get_column_schema(name);
+      found = OB_NOT_NULL(referenced_column) && referenced_column->is_ai_column();
+    }
+    for (int64_t i = 0; !found && i < node->num_child_; ++i) {
+      found = has_ai_column_reference(node->children_[i], table_schema);
+    }
+  }
+  return found;
+}
+}
+
 ObCreateTableResolver::ObCreateTableResolver(ObResolverParams &params)
     : ObCreateTableResolverBase(params),
       cur_column_id_(OB_APP_MIN_COLUMN_ID - 1),
@@ -881,6 +901,69 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
         // won't be here
         ret = OB_ERR_UNEXPECTED;
         SQL_RESV_LOG(WARN, "unexpected branch", K(ret));
+      }
+    }
+
+    // AI columns cannot depend on another AI column, because their requests
+    // are dispatched asynchronously and cannot be ordered by expression use.
+    for (int32_t i = 0; OB_SUCC(ret) && RESOLVE_NON_COL != resolve_rule && i < node->num_child_; ++i) {
+      ParseNode *element = node->children_[i];
+      if (OB_NOT_NULL(element) && T_COLUMN_DEFINITION == element->type_
+          && element->num_child_ >= 3 && OB_NOT_NULL(element->children_[2])) {
+        ParseNode *attrs_node = element->children_[2];
+        for (int64_t j = 0; OB_SUCC(ret) && j < attrs_node->num_child_; ++j) {
+          ParseNode *attr_node = attrs_node->children_[j];
+          if (OB_NOT_NULL(attr_node) && T_AI_COLUMN == attr_node->type_
+              && OB_NOT_NULL(attr_node->children_[0])
+              && has_ai_column_reference(attr_node->children_[0], table_schema)) {
+            ret = OB_NOT_SUPPORTED;
+            LOG_USER_ERROR(OB_NOT_SUPPORTED, "AI column dependencies");
+          }
+        }
+      }
+    }
+
+    // Materialize the per-column state used by asynchronous AI generation.
+    // These columns are intentionally hidden from ordinary SQL projections.
+    for (int64_t i = 0; OB_SUCC(ret) && RESOLVE_NON_COL != resolve_rule
+                         && i < table_schema.get_column_count(); ++i) {
+      ObColumnSchemaV2 *ai_column = table_schema.get_column_schema_by_idx(i);
+      if (OB_ISNULL(ai_column)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (ai_column->is_ai_column()) {
+        const uint64_t ai_column_id = ai_column->get_column_id();
+        uint64_t hidden_ids[3] = {OB_INVALID_ID, OB_INVALID_ID, OB_INVALID_ID};
+        const ObObjType hidden_types[3] = {ObIntType, ObUInt64Type, ObLongTextType};
+        const char *hidden_names[3] = {"__ai_state", "__ai_request", "__ai_spec"};
+        for (int64_t j = 0; OB_SUCC(ret) && j < 3; ++j) {
+          ObColumnSchemaV2 hidden_column;
+          char name_buf[OB_MAX_COLUMN_NAMES_LENGTH] = {'\0'};
+          int64_t pos = 0;
+          hidden_column.set_column_id(gen_column_id());
+          hidden_column.set_data_type(hidden_types[j]);
+          hidden_column.set_accuracy(ObAccuracy::DDL_DEFAULT_ACCURACY[hidden_types[j]]);
+          hidden_column.set_nullable(true);
+          hidden_column.set_is_hidden(true);
+          hidden_column.set_charset_type(CHARSET_UTF8MB4);
+          hidden_column.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+          if (OB_FAIL(databuff_printf(name_buf, sizeof(name_buf), pos, "%s_%lu_%lu",
+                                      hidden_names[j], ai_column_id, hidden_column.get_column_id()))) {
+          } else if (OB_FAIL(hidden_column.set_column_name(name_buf))) {
+          } else if (OB_FAIL(table_schema.add_column(hidden_column))) {
+          } else {
+            hidden_ids[j] = hidden_column.get_column_id();
+          }
+        }
+        if (OB_SUCC(ret)) {
+          ai_column = table_schema.get_column_schema(ai_column_id);
+          if (OB_ISNULL(ai_column)) {
+            ret = OB_ERR_UNEXPECTED;
+          } else {
+            ai_column->set_ai_column_state_column_id(hidden_ids[0]);
+            ai_column->set_ai_column_request_column_id(hidden_ids[1]);
+            ai_column->set_ai_column_result_spec_column_id(hidden_ids[2]);
+          }
+        }
       }
     }
 

@@ -118,6 +118,21 @@ int ObDelUpdResolver::resolve_assignments(const ParseNode &parse_node,
             }
           }
         }
+        if (OB_SUCC(ret) && table->is_basic_table()) {
+          const ObTableSchema *table_schema = nullptr;
+          if (OB_FAIL(schema_checker_->get_table_schema(table->ref_id_, table_schema))) {
+          } else if (OB_ISNULL(table_schema)) {
+            ret = OB_ERR_UNEXPECTED;
+          } else {
+            const ObColumnSchemaV2 *column_schema = table_schema->get_column_schema(ref_expr->get_column_id());
+            if (OB_ISNULL(column_schema)) {
+              ret = OB_ERR_UNEXPECTED;
+            } else if (column_schema->is_ai_column()) {
+              ret = OB_NOT_SUPPORTED;
+              LOG_USER_ERROR(OB_NOT_SUPPORTED, "assigning AI column results directly");
+            }
+          }
+        }
       }
       if (OB_SUCC(ret) && T_INSERT_SCOPE == scope) {
         if (OB_FAIL(mock_values_column_ref(ref_expr))) {
@@ -2172,6 +2187,18 @@ int ObDelUpdResolver::resolve_insert_columns(const ParseNode *node,
         LOG_USER_ERROR(OB_NOT_SUPPORTED, "specify __sess_create_time value");
       } else if (OB_FAIL(mock_values_column_ref(column_expr))) {
       }
+      if (OB_SUCC(ret) && !session_info_->get_ddl_info().is_ddl() && table_item->is_basic_table()) {
+        const ObTableSchema *table_schema = NULL;
+        const ObColumnSchemaV2 *column_schema = NULL;
+        if (OB_FAIL(schema_checker_->get_table_schema(table_item->ref_id_, table_schema))) {
+        } else if (OB_ISNULL(table_schema)
+                   || OB_ISNULL(column_schema = table_schema->get_column_schema(column_expr->get_column_id()))) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (column_schema->is_ai_column()) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "assigning AI column results directly");
+        }
+      }
     }//end for
   } else {
     if (del_upd_stmt->get_table_size() != 1) {
@@ -2194,7 +2221,18 @@ int ObDelUpdResolver::resolve_insert_columns(const ParseNode *node,
       for (int64_t i = 0; OB_SUCC(ret) && i < N; i++) {
         uint64_t column_id = column_items.at(i).column_id_;
         bool is_duplicate = false;
-        if (OB_FAIL(check_insert_column_duplicate(column_id, is_duplicate))) {
+        const ObTableSchema *table_schema = NULL;
+        const ObColumnSchemaV2 *column_schema = NULL;
+        if (!session_info_->get_ddl_info().is_ddl() && table_item->is_basic_table()
+            && OB_FAIL(schema_checker_->get_table_schema(table_item->ref_id_, table_schema))) {
+        } else if (!session_info_->get_ddl_info().is_ddl() && table_item->is_basic_table()
+                   && (OB_ISNULL(table_schema)
+                       || OB_ISNULL(column_schema = table_schema->get_column_schema(column_id)))) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_NOT_NULL(column_schema) && column_schema->is_ai_column()) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "assigning AI column results directly");
+        } else if (OB_FAIL(check_insert_column_duplicate(column_id, is_duplicate))) {
         } else if (is_duplicate) {
           ret = OB_ERR_FIELD_SPECIFIED_TWICE;
           ObCStringHelper helper;
