@@ -146,10 +146,10 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
 
 bool ObTextWhitespaceTokenizer::found_delimiter()
 {
-  bool found = false;
-  const char *curr_char = input_doc_->ptr_ + trav_pos_;
-  found = ob_isspace(cs_, *curr_char) || ob_iscntrl(cs_, *curr_char) || ob_ispunct(cs_, *curr_char);
-  return found;
+  const unsigned char ch = static_cast<unsigned char>(input_doc_->ptr_[trav_pos_]);
+  // All three ob_is* helpers read the same charset flag byte.
+  return nullptr != cs_->ctype
+         && 0 != ((cs_->ctype + 1)[ch] & (_MY_SPC | _MY_CTR | _MY_PNT));
 }
 
 ObTokenNormalizer::ObTokenNormalizer()
@@ -230,13 +230,23 @@ int ObTokenStopWordNormalizer::filter_special_marks(const ObDatum &check_token, 
 
 ObBasicEnglishNormalizer::ObBasicEnglishNormalizer()
   : ObTokenNormalizer(),
-    norm_allocator_("TxtTokGrpFilter", OB_MALLOC_NORMAL_BLOCK_SIZE)
+    norm_allocator_("TxtTokGrpFilter", OB_MALLOC_NORMAL_BLOCK_SIZE),
+    skip_unchanged_ascii_(false)
 {
+}
+
+int ObBasicEnglishNormalizer::inner_init(const ObCharsetInfo *cs, ObITokenStream &in_stream)
+{
+  UNUSED(in_stream);
+  skip_unchanged_ascii_ = nullptr != cs && nullptr != cs->csname
+                          && CHARSET_UTF8MB4 == ObCharset::charset_type(cs->csname);
+  return OB_SUCCESS;
 }
 
 void ObBasicEnglishNormalizer::reset()
 {
   norm_allocator_.reset();
+  skip_unchanged_ascii_ = false;
   ObTokenNormalizer::reset();
 }
 
@@ -304,10 +314,20 @@ int ObBasicEnglishNormalizer::get_next(ObDatum &next_token, int64_t &token_freq)
       ret = OB_ERR_UNEXPECTED;
     } else {
       ObString norm_alnum_token(norm_token_len, norm_token_ptr);
-      ObString norm_lower_token;
-      if (OB_FAIL(ObCharset::tolower(cs_, norm_alnum_token, norm_lower_token, norm_allocator_))) {
+      bool unchanged_ascii = skip_unchanged_ascii_;
+      for (uint32_t i = 0; unchanged_ascii && i < norm_token_len; ++i) {
+        const unsigned char ch = static_cast<unsigned char>(norm_token_ptr[i]);
+        unchanged_ascii = ch < 0x80 && !('A' <= ch && ch <= 'Z');
+      }
+      if (unchanged_ascii) {
+        // The input document remains alive until the consumer advances the stream.
+        next_token.set_string(norm_alnum_token);
       } else {
-        next_token.set_string(norm_lower_token);
+        ObString norm_lower_token;
+        if (OB_FAIL(ObCharset::tolower(cs_, norm_alnum_token, norm_lower_token, norm_allocator_))) {
+        } else {
+          next_token.set_string(norm_lower_token);
+        }
       }
     }
   }

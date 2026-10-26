@@ -130,8 +130,11 @@ public:
   virtual void reset() override;
   virtual void reuse() override;
   virtual int get_next(ObDatum &next_token, int64_t &token_freq) override;
+protected:
+  virtual int inner_init(const ObCharsetInfo *cs, ObITokenStream &in_stream) override;
 private:
   ObArenaAllocator norm_allocator_;
+  bool skip_unchanged_ascii_;
 };
 
 // group (deduplicate) and count
