@@ -183,6 +183,7 @@ int TableItem::deep_copy(ObIRawExprCopier &expr_copier,
   snapshot_query_type_ = other.snapshot_query_type_;
   file_sql_kind_ = other.file_sql_kind_;
   file_sql_path_ = other.file_sql_path_;
+  file_sql_root_ = other.file_sql_root_;
   file_sql_header_ = other.file_sql_header_;
   file_sql_delimiter_ = other.file_sql_delimiter_;
   file_sql_quote_ = other.file_sql_quote_;

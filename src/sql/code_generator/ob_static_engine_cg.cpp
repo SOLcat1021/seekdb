@@ -5517,6 +5517,7 @@ int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFunctionTableSpec 
     } else if (table_item->file_sql_kind_ != 0) {
       spec.file_sql_kind_ = table_item->file_sql_kind_;
       OZ(ob_write_string(alloc, table_item->file_sql_path_, spec.file_sql_path_));
+      OZ(ob_write_string(alloc, table_item->file_sql_root_, spec.file_sql_root_));
       spec.file_sql_header_ = table_item->file_sql_header_;
       spec.file_sql_delimiter_ = table_item->file_sql_delimiter_;
       spec.file_sql_quote_ = table_item->file_sql_quote_;

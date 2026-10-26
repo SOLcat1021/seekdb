@@ -58,6 +58,15 @@ int main(int argc, char **argv)
   write_file(path, "id\n999999999\n");
   assert(!reader.next(values, is_null, end, error) && error.find("changed") != std::string::npos);
 
+  write_file(path, "\xEF\xBB\xBFid,name\n1,\xE9\x99\x88\n");
+  assert(reader.open(path, CsvOptions(), error));
+  assert(reader.infer_schema(error));
+  assert(reader.columns()[0].name == "id");
+  assert(reader.next(values, is_null, end, error) && values[1] == "\xE9\x99\x88");
+  write_file(path, "name\n\xC0\x80\n");
+  assert(reader.open(path, CsvOptions(), error));
+  assert(!reader.infer_schema(error) && error.find("UTF-8") != std::string::npos);
+
   assert(classify_csv_value("9223372036854775807") == CsvType::BIGINT);
   assert(classify_csv_value("9223372036854775808") == CsvType::DOUBLE);
   assert(classify_csv_value("2026-02-29") == CsvType::VARCHAR);

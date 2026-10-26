@@ -4056,6 +4056,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
   TableItem *item = nullptr;
   ObString secure_file_priv;
   std::string canonical_path;
+  std::string canonical_root;
   file_sql::CsvReader reader;
   file_sql::JsonlReader json_reader;
   file_sql::CsvOptions csv_options;
@@ -4065,13 +4066,14 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
                             parse_tree.children_[0]->value_ : 0;
   if (OB_ISNULL(stmt) || OB_ISNULL(session_info_) || OB_ISNULL(allocator_) ||
       parse_tree.type_ != T_FILE_TABLE_EXPRESSION || parse_tree.num_child_ != 4 ||
+      OB_ISNULL(parse_tree.children_) ||
       OB_ISNULL(parse_tree.children_[0]) || OB_ISNULL(path_node = parse_tree.children_[1])) {
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(session_info_->get_sys_variable(SYS_VAR_ENABLE_FILE_SQL, enabled))) {
   } else if (!enabled) {
     ret = OB_NOT_SUPPORTED;
     LOG_USER_ERROR(OB_NOT_SUPPORTED, "file SQL is disabled");
-  } else if (file_kind != 1 && file_kind != 2 && file_kind != 3) {
+  } else if (file_kind != 1 && file_kind != 2 && file_kind != 3 && file_kind != 5) {
     ret = OB_NOT_SUPPORTED;
     LOG_USER_ERROR(OB_NOT_SUPPORTED, "this file SQL format");
   } else if (path_node->type_ != T_VARCHAR || OB_ISNULL(path_node->str_value_) ||
@@ -4084,16 +4086,32 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
     }
     if (OB_SUCC(ret)) {
       std::error_code path_error;
-      const std::filesystem::path resolved =
-          std::filesystem::canonical(std::filesystem::u8path(supplied), path_error);
-      if (path_error) {
-        ret = OB_FILE_NOT_EXIST;
+      const std::filesystem::path input_path = std::filesystem::u8path(supplied);
+      if (file_kind == 5) {
+        const std::filesystem::path parent = input_path.has_parent_path() ?
+            input_path.parent_path() : std::filesystem::path(".");
+        if (parent.string().find_first_of("*?") != std::string::npos ||
+            input_path.filename().empty()) {
+          ret = OB_NOT_SUPPORTED;
+        } else {
+          const std::filesystem::path directory = std::filesystem::canonical(parent, path_error);
+          if (path_error) {
+            ret = OB_FILE_NOT_EXIST;
+          } else {
+            canonical_path = (directory / input_path.filename()).string();
+          }
+        }
       } else {
-        canonical_path = resolved.string();
+        const std::filesystem::path resolved = std::filesystem::canonical(input_path, path_error);
+        if (path_error) {
+          ret = OB_FILE_NOT_EXIST;
+        } else {
+          canonical_path = resolved.string();
+        }
       }
     }
   }
-  const ParseNode *option_list = parse_tree.children_[2];
+  const ParseNode *option_list = OB_NOT_NULL(parse_tree.children_) ? parse_tree.children_[2] : nullptr;
   for (int64_t i = 0; OB_SUCC(ret) && OB_NOT_NULL(option_list) && i < option_list->num_child_; ++i) {
     const ParseNode *option = option_list->children_[i];
     if (OB_ISNULL(option) || option->type_ != T_OP_EQ || option->num_child_ != 2 ||
@@ -4106,7 +4124,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
       if (file_kind == 1 && name.case_compare("header") == 0 &&
           (value_node->type_ == T_BOOL || value_node->type_ == T_INT)) {
         csv_options.header = value_node->value_ != 0;
-      } else if (name.case_compare("sample_size") == 0) {
+      } else if (file_kind != 5 && name.case_compare("sample_size") == 0) {
         const bool full_sample = value_node->type_ == T_OP_NEG &&
                                  value_node->num_child_ == 1 &&
                                  OB_NOT_NULL(value_node->children_[0]) &&
@@ -4126,7 +4144,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
                  (name.case_compare("nullstr") == 0 || name.case_compare("null") == 0) &&
                  value_node->type_ == T_VARCHAR) {
         csv_options.null_text.assign(value_node->str_value_, value_node->str_len_);
-      } else if (file_kind != 1 && name.case_compare("format") == 0 &&
+      } else if ((file_kind == 2 || file_kind == 3) && name.case_compare("format") == 0 &&
                  value_node->type_ == T_VARCHAR &&
                  ObString(value_node->str_len_, value_node->str_value_).case_compare("newline_delimited") == 0) {
         // read_json and read_ndjson both consume one flat object per line.
@@ -4150,6 +4168,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
     } else {
       const std::filesystem::path root =
           std::filesystem::canonical(std::filesystem::u8path(root_text), path_error);
+      if (!path_error) canonical_root = root.string();
       const std::filesystem::path file = std::filesystem::u8path(canonical_path);
       auto root_part = root.begin();
       auto file_part = file.begin();
@@ -4182,7 +4201,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
               !reader.infer_schema(scan_error))) {
     ret = OB_ERR_PARSE_SQL;
     LOG_WARN("failed to inspect CSV file", K(ret), K(scan_error.c_str()));
-  } else if (file_kind != 1 &&
+  } else if ((file_kind == 2 || file_kind == 3) &&
              (!json_reader.open(canonical_path, scan_error) ||
               !json_reader.infer_schema(scan_error))) {
     ret = OB_ERR_PARSE_SQL;
@@ -4192,14 +4211,20 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else if (OB_FAIL(ob_write_string(*allocator_, ObString::make_string(canonical_path.c_str()),
                                      item->file_sql_path_))) {
+  } else if (OB_FAIL(ob_write_string(*allocator_, ObString::make_string(canonical_root.c_str()),
+                                     item->file_sql_root_))) {
   } else {
     item->file_sql_header_ = csv_options.header;
     item->file_sql_delimiter_ = csv_options.delimiter;
     item->file_sql_quote_ = csv_options.quote;
-    item->file_sql_size_ = file_kind == 1 ? reader.file_size() : json_reader.file_size();
-    item->file_sql_mtime_ = file_kind == 1 ? reader.file_mtime() : json_reader.file_mtime();
-    item->file_sql_device_ = file_kind == 1 ? reader.file_device() : json_reader.file_device();
-    item->file_sql_inode_ = file_kind == 1 ? reader.file_inode() : json_reader.file_inode();
+    item->file_sql_size_ = file_kind == 1 ? reader.file_size() :
+                           file_kind == 5 ? 0 : json_reader.file_size();
+    item->file_sql_mtime_ = file_kind == 1 ? reader.file_mtime() :
+                            file_kind == 5 ? 0 : json_reader.file_mtime();
+    item->file_sql_device_ = file_kind == 1 ? reader.file_device() :
+                             file_kind == 5 ? 0 : json_reader.file_device();
+    item->file_sql_inode_ = file_kind == 1 ? reader.file_inode() :
+                            file_kind == 5 ? 0 : json_reader.file_inode();
     if (!csv_options.null_text.empty()) {
       OZ(ob_write_string(*allocator_, ObString::make_string(csv_options.null_text.c_str()),
                          item->file_sql_null_text_));
@@ -4217,8 +4242,10 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
       item->function_table_expr_ = path_expr;
       OZ(stmt->add_table_item(session_info_, item));
     }
-    const std::vector<file_sql::CsvColumn> &columns =
-        file_kind == 1 ? reader.columns() : json_reader.columns();
+    const std::vector<file_sql::CsvColumn> glob_columns =
+        {{"file", file_sql::CsvType::VARCHAR}};
+    const std::vector<file_sql::CsvColumn> &columns = file_kind == 1 ? reader.columns() :
+        file_kind == 5 ? glob_columns : json_reader.columns();
     for (size_t i = 0; OB_SUCC(ret) && i < columns.size(); ++i) {
       const file_sql::CsvColumn &column = columns[i];
       ObObjMeta meta;

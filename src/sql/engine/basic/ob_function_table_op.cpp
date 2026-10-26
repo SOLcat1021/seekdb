@@ -22,6 +22,9 @@
 #include "common/timezone/ob_time_convert.h"
 #include <cerrno>
 #include <cstdlib>
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <string>
 
 
@@ -30,9 +33,53 @@ namespace oceanbase
 using namespace common;
 namespace sql
 {
+namespace {
+
+bool glob_match(const std::string &pattern, const std::string &name)
+{
+  size_t p = 0, n = 0, star = std::string::npos, retry = 0;
+  while (n < name.size()) {
+    if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == name[n])) {
+      ++p;
+      ++n;
+    } else if (p < pattern.size() && pattern[p] == '*') {
+      star = p++;
+      retry = n;
+    } else if (star != std::string::npos) {
+      p = star + 1;
+      n = ++retry;
+    } else {
+      return false;
+    }
+  }
+  while (p < pattern.size() && pattern[p] == '*') ++p;
+  return p == pattern.size();
+}
+
+bool path_under_root(const std::filesystem::path &path, const std::filesystem::path &root)
+{
+  auto part = path.begin();
+  for (auto required = root.begin(); required != root.end(); ++required, ++part) {
+    if (part == path.end()) return false;
+    std::string expected = required->string();
+    std::string actual = part->string();
+#ifdef _WIN32
+    std::transform(expected.begin(), expected.end(), expected.begin(), [](unsigned char ch) {
+      return static_cast<char>(std::tolower(ch));
+    });
+    std::transform(actual.begin(), actual.end(), actual.begin(), [](unsigned char ch) {
+      return static_cast<char>(std::tolower(ch));
+    });
+#endif
+    if (expected != actual) return false;
+  }
+  return true;
+}
+
+} // namespace
 
 OB_SERIALIZE_MEMBER((ObFunctionTableSpec, ObOpSpec), value_expr_, column_exprs_, has_correlated_expr_,
-                    file_sql_kind_, file_sql_path_, file_sql_header_, file_sql_delimiter_,
+                    file_sql_kind_, file_sql_path_, file_sql_root_, file_sql_header_, file_sql_delimiter_,
                     file_sql_quote_, file_sql_null_text_, file_sql_size_, file_sql_mtime_,
                     file_sql_device_, file_sql_inode_);
 
@@ -69,6 +116,42 @@ int ObFunctionTableOp::inner_open()
     } else {
       next_row_func_ = &ObFunctionTableOp::inner_get_next_row_file_sql;
     }
+  } else if (MY_SPEC.file_sql_kind_ == 5) {
+    std::string pattern_text(MY_SPEC.file_sql_path_.ptr(), MY_SPEC.file_sql_path_.length());
+    std::string root_text(MY_SPEC.file_sql_root_.ptr(), MY_SPEC.file_sql_root_.length());
+    const std::filesystem::path pattern_path = std::filesystem::u8path(pattern_text);
+    const std::filesystem::path root = std::filesystem::u8path(root_text);
+    std::string pattern = pattern_path.filename().string();
+    std::error_code error;
+    std::filesystem::directory_iterator entry(pattern_path.parent_path(), error);
+    glob_paths_.clear();
+    glob_index_ = 0;
+    if (error || MY_SPEC.column_exprs_.count() != 1) {
+      ret = OB_ERR_PARSE_SQL;
+    }
+    for (; OB_SUCC(ret) && entry != std::filesystem::directory_iterator(); entry.increment(error)) {
+      if (error) {
+        ret = OB_ERR_PARSE_SQL;
+      } else if (glob_match(pattern, entry->path().filename().string())) {
+        const std::filesystem::path found = std::filesystem::canonical(entry->path(), error);
+        if (error) {
+          ret = OB_ERR_PARSE_SQL;
+        } else if (!path_under_root(found, root)) {
+          ret = OB_ERR_NO_PRIVILEGE;
+        } else if (std::filesystem::is_regular_file(found, error)) {
+          if (glob_paths_.size() >= 10000) {
+            ret = OB_NOT_SUPPORTED;
+          } else {
+            glob_paths_.push_back(found.generic_string());
+          }
+        }
+      }
+    }
+    if (error && OB_SUCC(ret)) ret = OB_ERR_PARSE_SQL;
+    if (OB_SUCC(ret)) {
+      std::sort(glob_paths_.begin(), glob_paths_.end());
+      next_row_func_ = &ObFunctionTableOp::inner_get_next_row_file_sql;
+    }
   } else if (OB_ISNULL(MY_SPEC.value_expr_)) {
     ret = OB_ERR_UNEXPECTED;
   } else if (ObExtendType == MY_SPEC.value_expr_->datum_meta_.type_) {
@@ -85,6 +168,7 @@ int ObFunctionTableOp::inner_rescan()
   if (OB_FAIL(ObOperator::inner_rescan())) {
   } else {
     node_idx_ = 0;
+    glob_index_ = 0;
     if (MY_SPEC.file_sql_kind_ >= 1 && MY_SPEC.file_sql_kind_ <= 3) {
       std::string error;
       if (!(MY_SPEC.file_sql_kind_ == 1 ? csv_reader_.rewind(error) : json_reader_.rewind(error))) {
@@ -111,6 +195,8 @@ int ObFunctionTableOp::inner_close()
   value_table_ = NULL;
   csv_reader_.close();
   json_reader_.close();
+  glob_paths_.clear();
+  glob_index_ = 0;
   return ret;
 }
 
@@ -155,6 +241,24 @@ int ObFunctionTableOp::inner_get_next_row_file_sql()
   std::string error;
   clear_evaluated_flag();
   if (OB_FAIL(ctx_.check_status())) {
+  } else if (MY_SPEC.file_sql_kind_ == 5) {
+    if (glob_index_ >= glob_paths_.size()) {
+      ret = OB_ITER_END;
+    } else if (MY_SPEC.column_exprs_.count() != 1 || OB_ISNULL(MY_SPEC.column_exprs_.at(0))) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      ObExpr *expr = MY_SPEC.column_exprs_.at(0);
+      const std::string &path = glob_paths_[glob_index_++];
+      ObObj obj;
+      obj.set_varchar(path.data(), static_cast<ObString::obstr_size_t>(path.size()));
+      obj.set_collation_type(expr->obj_meta_.get_collation_type());
+      ObDatum &datum = expr->locate_datum_for_write(eval_ctx_);
+      if (OB_FAIL(datum.from_obj(obj, expr->obj_datum_map_))) {
+      } else {
+        expr->set_evaluated_projected(eval_ctx_);
+      }
+    }
+    return ret;
   } else if (!(MY_SPEC.file_sql_kind_ == 1 ?
                csv_reader_.next(csv_values_, csv_nulls_, end, error) :
                json_reader_.next(csv_values_, csv_nulls_, end, error))) {

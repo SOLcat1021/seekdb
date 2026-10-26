@@ -35,7 +35,7 @@ OB_UNIS_VERSION_V(1);
 public:
   ObFunctionTableSpec(common::ObIAllocator &alloc, const ObPhyOperatorType type)
     : ObOpSpec(alloc, type), value_expr_(nullptr), column_exprs_(alloc), has_correlated_expr_(false),
-      file_sql_kind_(0), file_sql_path_(), file_sql_header_(true),
+      file_sql_kind_(0), file_sql_path_(), file_sql_root_(), file_sql_header_(true),
       file_sql_delimiter_(','), file_sql_quote_('"'), file_sql_null_text_(),
       file_sql_size_(0), file_sql_mtime_(0), file_sql_device_(0), file_sql_inode_(0)
   {}
@@ -44,6 +44,7 @@ public:
   bool has_correlated_expr_;
   int8_t file_sql_kind_;
   common::ObString file_sql_path_;
+  common::ObString file_sql_root_;
   bool file_sql_header_;
   char file_sql_delimiter_;
   char file_sql_quote_;
@@ -85,6 +86,8 @@ private:
   pl::ObPLCollection *value_table_;
   file_sql::CsvReader csv_reader_;
   file_sql::JsonlReader json_reader_;
+  std::vector<std::string> glob_paths_;
+  size_t glob_index_ = 0;
   std::vector<std::string> csv_values_;
   std::vector<bool> csv_nulls_;
   int (ObFunctionTableOp::*next_row_func_)();

@@ -302,9 +302,10 @@ struct TableItem
   SnapshotQueryType snapshot_query_type_;
   ObRawExpr *function_table_expr_;
   // File scans reuse the native function-table planning path.
-  // 0 means an ordinary function table; 1 is a CSV scan.
+  // 0: ordinary function table; 1: CSV; 2/3: JSONL; 5: glob.
   int8_t file_sql_kind_;
   common::ObString file_sql_path_;
+  common::ObString file_sql_root_;
   bool file_sql_header_;
   char file_sql_delimiter_;
   char file_sql_quote_;

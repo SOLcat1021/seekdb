@@ -60,6 +60,38 @@ bool valid_datetime(const std::string &value)
          number(value, 17, 2) < 60;
 }
 
+bool valid_utf8(const std::string &value)
+{
+  const unsigned char *bytes = reinterpret_cast<const unsigned char *>(value.data());
+  for (size_t i = 0; i < value.size();) {
+    const unsigned char first = bytes[i++];
+    if (first < 0x80) continue;
+    size_t continuation = 0;
+    if (first >= 0xC2 && first <= 0xDF) continuation = 1;
+    else if (first >= 0xE0 && first <= 0xEF) continuation = 2;
+    else if (first >= 0xF0 && first <= 0xF4) continuation = 3;
+    else return false;
+    if (i + continuation > value.size()) return false;
+    const unsigned char second = bytes[i];
+    if ((first == 0xE0 && second < 0xA0) || (first == 0xED && second >= 0xA0) ||
+        (first == 0xF0 && second < 0x90) || (first == 0xF4 && second >= 0x90)) return false;
+    for (size_t j = 0; j < continuation; ++j) {
+      if (bytes[i++] < 0x80 || bytes[i - 1] > 0xBF) return false;
+    }
+  }
+  return true;
+}
+
+void strip_bom(std::vector<std::string> &values)
+{
+  if (!values.empty() && values[0].size() >= 3 &&
+      static_cast<unsigned char>(values[0][0]) == 0xEF &&
+      static_cast<unsigned char>(values[0][1]) == 0xBB &&
+      static_cast<unsigned char>(values[0][2]) == 0xBF) {
+    values[0].erase(0, 3);
+  }
+}
+
 } // namespace
 
 CsvType classify_csv_value(const std::string &value)
@@ -185,12 +217,17 @@ bool CsvReader::read_record(std::vector<std::string> &values, bool &end,
         end = true;
         return true;
       }
+      if (!valid_utf8(field)) {
+        error = "Invalid UTF-8 in CSV record " + std::to_string(record_number_ + 1);
+        return false;
+      }
       values.push_back(field);
       quoted_fields_.push_back(field_quoted);
       if (values.size() > options_.max_columns) {
         error = "CSV column limit exceeded at record " + std::to_string(record_number_ + 1);
         return false;
       }
+      if (record_number_ == 0) strip_bom(values);
       ++record_number_;
       return true;
     }
@@ -218,6 +255,10 @@ bool CsvReader::read_record(std::vector<std::string> &values, bool &end,
         field.push_back(ch);
       }
     } else if (ch == options_.delimiter || ch == '\n' || ch == '\r') {
+      if (!valid_utf8(field)) {
+        error = "Invalid UTF-8 in CSV record " + std::to_string(record_number_ + 1);
+        return false;
+      }
       values.push_back(field);
       quoted_fields_.push_back(field_quoted);
       if (values.size() > options_.max_columns) {
@@ -230,6 +271,7 @@ bool CsvReader::read_record(std::vector<std::string> &values, bool &end,
       field_quoted = false;
       if (ch != options_.delimiter) {
         if (ch == '\r' && stream_.peek() == '\n') stream_.get();
+        if (record_number_ == 0) strip_bom(values);
         ++record_number_;
         return true;
       }
