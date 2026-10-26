@@ -52,8 +52,8 @@ TokenizeContext::TokenizeContext(ObCollationType coll_type,
                                  int64_t fulltext_len,
                                  bool is_smart)
     : coll_type_(coll_type), fulltext_(fulltext), fulltext_len_(fulltext_len), cursor_(0),
-      next_char_len_(0), handle_size_(0), is_smart_(is_smart), token_list_(allocator),
-      result_list_(allocator)
+      next_char_len_(0), next_unicode_(0), charset_type_(ObCharset::charset_type_by_coll(coll_type)),
+      handle_size_(0), is_smart_(is_smart), token_list_(allocator), result_list_(allocator)
 {
 }
 
@@ -99,6 +99,42 @@ int TokenizeContext::current_char_type(ObFTCharUtil::CharType &type)
   return ret;
 }
 
+int TokenizeContext::check_cn_number(bool &is_cn_number) const
+{
+  int ret = OB_SUCCESS;
+  if (CHARSET_UTF8MB4 == charset_type_) {
+    is_cn_number = ObUnicodeBlockUtils::is_unicode_cn_number(next_unicode_);
+  } else {
+    ret = ObFTCharUtil::check_cn_number(
+        coll_type_, fulltext_ + cursor_, static_cast<uint8_t>(next_char_len_), is_cn_number);
+  }
+  return ret;
+}
+
+int TokenizeContext::check_num_connector(bool &is_connector) const
+{
+  int ret = OB_SUCCESS;
+  if (CHARSET_UTF8MB4 == charset_type_) {
+    is_connector = ObUnicodeBlockUtils::check_num_connector(next_unicode_);
+  } else {
+    ret = ObFTCharUtil::check_num_connector(
+        coll_type_, fulltext_ + cursor_, static_cast<uint8_t>(next_char_len_), is_connector);
+  }
+  return ret;
+}
+
+int TokenizeContext::check_letter_connector(bool &is_connector) const
+{
+  int ret = OB_SUCCESS;
+  if (CHARSET_UTF8MB4 == charset_type_) {
+    is_connector = ObUnicodeBlockUtils::check_letter_connector(next_unicode_);
+  } else {
+    ret = ObFTCharUtil::check_letter_connector(
+        coll_type_, fulltext_ + cursor_, static_cast<uint8_t>(next_char_len_), is_connector);
+  }
+  return ret;
+}
+
 int TokenizeContext::prepare_next_char()
 {
   int ret = OB_SUCCESS;
@@ -109,7 +145,8 @@ int TokenizeContext::prepare_next_char()
   } else if (OB_FAIL(ObFTCharUtil::classify_first_char(coll_type_,
                                                        fulltext_ + cursor_,
                                                        next_char_len_,
-                                                       next_char_type_))) {
+                                                       next_char_type_,
+                                                       next_unicode_))) {
   }
   return ret;
 }

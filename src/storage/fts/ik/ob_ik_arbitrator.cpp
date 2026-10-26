@@ -113,8 +113,10 @@ int ObIKArbitrator::output_result(TokenizeContext &ctx)
 
   int64_t char_len = 0;
   ObIKTokenChain *chain = nullptr;
+  const bool is_utf8mb4 = CHARSET_UTF8MB4 == ObCharset::charset_type_by_coll(ctx.collation());
   for (int64_t current = 0; OB_SUCC(ret) && current < ctx.fulltext_len();) {
     ObFTCharUtil::CharType type;
+    ob_wc_t unicode = 0;
     // maybe not so good to keep single, check it later
     if (OB_FAIL(ObCharset::first_valid_char(ctx.collation(),
                                             ctx.fulltext() + current,
@@ -123,7 +125,8 @@ int ObIKArbitrator::output_result(TokenizeContext &ctx)
     } else if (OB_FAIL(ObFTCharUtil::classify_first_char(ctx.collation(),
                                                          ctx.fulltext() + current,
                                                          char_len,
-                                                         type))) {
+                                                         type,
+                                                         unicode))) {
     } else if (ObFTCharUtil::CharType::USELESS == type) {
       current += char_len; // skip useless char
     } else if (OB_FAIL(chains_.get_refactored(current, chain)) && OB_HASH_NOT_EXIST != ret) {
@@ -144,10 +147,12 @@ int ObIKArbitrator::output_result(TokenizeContext &ctx)
           if (OB_FAIL(ctx.result_list().push_back(token))) {
           }
         } else if (ObFTCharUtil::CharType::OTHER_CJK == type) {
-          if (OB_FAIL(ObFTCharUtil::is_ignore_single_cjk(ctx.collation(),
-                                                         ctx.fulltext() + current,
-                                                         char_len,
-                                                         is_ignore))) {
+          if (is_utf8mb4) {
+            is_ignore = ObUnicodeBlockUtils::check_ignore_as_single(unicode);
+          } else if (OB_FAIL(ObFTCharUtil::is_ignore_single_cjk(ctx.collation(),
+                                                                 ctx.fulltext() + current,
+                                                                 char_len,
+                                                                 is_ignore))) {
           } else if (!is_ignore && !FALSE_IT(token.type_ = ObIKTokenType::IK_OTHER_CJK_TOKEN)
                      && OB_FAIL(ctx.result_list().push_back(token))) {
           } else {
