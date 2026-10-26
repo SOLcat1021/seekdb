@@ -92,7 +92,7 @@ def check(repo: Path) -> List[str]:
     expected_counts = {
         "SQL_UNITY_GROUPS": 1107,
         "SQL_SIMD_UNITY_GROUPS": 3,
-        "SQL_STANDALONE_SOURCES": 5,
+        "SQL_STANDALONE_SOURCES": 7,
         "SQL_EXTRA_SOURCES": 21,
         "SQL_PARSER_SOURCES": 15,
     }

@@ -293,6 +293,7 @@ END_P SET_VAR DELIMITER
         GLOBAL_ALIAS
 
         HASH HEAP HELP HISTOGRAM HOUR HIDDEN HYBRID HYBRID_HIST HYBRID_SEARCH
+        READ_CSV READ_JSON READ_NDJSON READ_PARQUET GLOB
 
         IDENTIFIED IK_MODE ILOG IMMEDIATE IMPORT INCLUDING INCR INDEXES INFO
         INNODB INPLACE INSERT_METHOD INSTANT INSTANCE INVOKER IO IO_THREAD IPC ISOLATE ISOLATION ISSUER
@@ -511,6 +512,7 @@ END_P SET_VAR DELIMITER
 %type <node> column_list_with_boost with_param_column_ref
 %type <node> es_sql_opt
 %type <node> hybrid_search_expr hybrid_search_param
+%type <node> file_sql_function file_sql_table_expr file_sql_option file_sql_option_list
 %type <node> vector_similarity_expr vector_similarity_metric
 %type <node> algorithm_opt lock_opt
 %type <node> flush_privileges_stmt opt_flush_privileges_scope
@@ -10848,6 +10850,10 @@ tbl_name
 {
   $$ = $1;
 }
+| file_sql_table_expr
+{
+  $$ = $1;
+}
 ;
 
 tbl_name:
@@ -17468,6 +17474,79 @@ HYBRID_SEARCH '(' literal ',' hybrid_search_param ')'
 }
 ;
 
+file_sql_function:
+READ_CSV
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 1;
+}
+| READ_JSON
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 2;
+}
+| READ_NDJSON
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 3;
+}
+| READ_PARQUET
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 4;
+}
+| GLOB
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 5;
+}
+;
+
+file_sql_table_expr:
+file_sql_function '(' literal ')' %prec LOWER_PARENS
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, NULL, NULL);
+}
+| file_sql_function '(' literal ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, NULL, $5);
+}
+| file_sql_function '(' literal ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, NULL, $6);
+}
+| file_sql_function '(' literal ',' file_sql_option_list ')' %prec LOWER_PARENS
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $5, NULL);
+}
+| file_sql_function '(' literal ',' file_sql_option_list ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $5, $7);
+}
+| file_sql_function '(' literal ',' file_sql_option_list ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $5, $8);
+}
+;
+
+file_sql_option_list:
+file_sql_option
+{
+  malloc_list_node($$, result->malloc_pool_, T_ARGUMENT_LIST, 2, 1, $1);
+}
+| file_sql_option_list ',' file_sql_option
+{
+  push_back_list(result->malloc_pool_, result, $$, $1, $3);
+}
+;
+
+file_sql_option:
+relation_name '=' simple_expr
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, $1, $3);
+}
+;
+
 hybrid_search_param:
 literal
 {
@@ -18181,6 +18260,11 @@ ACCOUNT
 |       INCONSISTENT 
 |       INDIVIDUAL
 |       HYBRID_SEARCH
+|       READ_CSV
+|       READ_JSON
+|       READ_NDJSON
+|       READ_PARQUET
+|       GLOB
 ;
 
 unreserved_keyword_special:

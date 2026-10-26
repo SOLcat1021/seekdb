@@ -20,6 +20,8 @@
 #include "sql/engine/ob_operator.h"
 #include "sql/engine/basic/ob_chunk_datum_store.h"
 #include "lib/charset/ob_charset.h"
+#include "sql/engine/basic/ob_file_sql_csv_reader.h"
+#include "sql/engine/basic/ob_file_sql_jsonl_reader.h"
 
 namespace oceanbase
 {
@@ -32,11 +34,24 @@ class ObFunctionTableSpec : public ObOpSpec
 OB_UNIS_VERSION_V(1);
 public:
   ObFunctionTableSpec(common::ObIAllocator &alloc, const ObPhyOperatorType type)
-    : ObOpSpec(alloc, type), value_expr_(nullptr), column_exprs_(alloc), has_correlated_expr_(false)
+    : ObOpSpec(alloc, type), value_expr_(nullptr), column_exprs_(alloc), has_correlated_expr_(false),
+      file_sql_kind_(0), file_sql_path_(), file_sql_header_(true),
+      file_sql_delimiter_(','), file_sql_quote_('"'), file_sql_null_text_(),
+      file_sql_size_(0), file_sql_mtime_(0), file_sql_device_(0), file_sql_inode_(0)
   {}
   ObExpr *value_expr_;
   common::ObFixedArray<ObExpr*, common::ObIAllocator> column_exprs_;
   bool has_correlated_expr_;
+  int8_t file_sql_kind_;
+  common::ObString file_sql_path_;
+  bool file_sql_header_;
+  char file_sql_delimiter_;
+  char file_sql_quote_;
+  common::ObString file_sql_null_text_;
+  int64_t file_sql_size_;
+  int64_t file_sql_mtime_;
+  uint64_t file_sql_device_;
+  uint64_t file_sql_inode_;
 };
 
 class ObFunctionTableOp : public ObOperator
@@ -60,6 +75,7 @@ public:
 private:
   int inner_get_next_row_udf();
   int inner_get_next_row_sys_func();
+  int inner_get_next_row_file_sql();
   int get_current_result(common::ObObj &result);
   int64_t node_idx_;
   bool already_calc_;
@@ -67,6 +83,10 @@ private:
   int64_t col_count_;
   common::ObObj value_;
   pl::ObPLCollection *value_table_;
+  file_sql::CsvReader csv_reader_;
+  file_sql::JsonlReader json_reader_;
+  std::vector<std::string> csv_values_;
+  std::vector<bool> csv_nulls_;
   int (ObFunctionTableOp::*next_row_func_)();
 };
 
