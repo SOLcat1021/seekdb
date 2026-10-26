@@ -36,6 +36,7 @@ namespace
 {
 struct RerankMatch
 {
+  RerankMatch() : index_(0), score_(0), result_(nullptr) {}
   RerankMatch(const int64_t index, const float score, ObJsonObject *result)
       : index_(index), score_(score), result_(result) {}
   int64_t index_;
