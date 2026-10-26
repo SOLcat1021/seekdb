@@ -185,8 +185,11 @@ fn copy_text(text: &str, output: *mut i8, capacity: usize) -> usize {
     text.len()
 }
 
+/// # Safety
+/// `path` must reference `path_len` readable bytes. If non-null, `error` must
+/// reference `error_capacity` writable bytes.
 #[no_mangle]
-pub extern "C" fn file_sql_parquet_open(
+pub unsafe extern "C" fn file_sql_parquet_open(
     path: *const u8,
     path_len: usize,
     error: *mut i8,
@@ -218,8 +221,11 @@ pub extern "C" fn file_sql_parquet_open(
     }
 }
 
+/// # Safety
+/// `reader` must be null or a live handle returned by `file_sql_parquet_open`;
+/// it must be closed exactly once and have no concurrent users.
 #[no_mangle]
-pub extern "C" fn file_sql_parquet_close(reader: *mut FileSqlParquetReader) {
+pub unsafe extern "C" fn file_sql_parquet_close(reader: *mut FileSqlParquetReader) {
     if !reader.is_null() {
         // SAFETY: The caller owns the pointer from file_sql_parquet_open.
         unsafe {
@@ -228,14 +234,21 @@ pub extern "C" fn file_sql_parquet_close(reader: *mut FileSqlParquetReader) {
     }
 }
 
+/// # Safety
+/// `reader` must be null or a live handle with no concurrent mutable access.
 #[no_mangle]
-pub extern "C" fn file_sql_parquet_column_count(reader: *const FileSqlParquetReader) -> usize {
+pub unsafe extern "C" fn file_sql_parquet_column_count(
+    reader: *const FileSqlParquetReader,
+) -> usize {
     // SAFETY: Null is checked and the caller owns a live reader.
     unsafe { reader.as_ref().map_or(0, |r| r.columns.len()) }
 }
 
+/// # Safety
+/// `reader` must be a live handle without concurrent mutable access. If
+/// non-null, `output` must reference `capacity` writable bytes.
 #[no_mangle]
-pub extern "C" fn file_sql_parquet_column_name(
+pub unsafe extern "C" fn file_sql_parquet_column_name(
     reader: *const FileSqlParquetReader,
     column: usize,
     output: *mut i8,
@@ -246,8 +259,10 @@ pub extern "C" fn file_sql_parquet_column_name(
         .map_or(0, |c| copy_text(&c.name, output, capacity))
 }
 
+/// # Safety
+/// `reader` must be null or a live handle with no concurrent mutable access.
 #[no_mangle]
-pub extern "C" fn file_sql_parquet_column_type(
+pub unsafe extern "C" fn file_sql_parquet_column_type(
     reader: *const FileSqlParquetReader,
     column: usize,
 ) -> i32 {
@@ -255,8 +270,10 @@ pub extern "C" fn file_sql_parquet_column_type(
     unsafe { reader.as_ref().and_then(|r| r.columns.get(column)) }.map_or(-1, |c| c.kind)
 }
 
+/// # Safety
+/// `reader` must be null or a live handle with no concurrent mutable access.
 #[no_mangle]
-pub extern "C" fn file_sql_parquet_column_nullable(
+pub unsafe extern "C" fn file_sql_parquet_column_nullable(
     reader: *const FileSqlParquetReader,
     column: usize,
 ) -> i32 {
@@ -265,8 +282,10 @@ pub extern "C" fn file_sql_parquet_column_nullable(
         .map_or(-1, |c| i32::from(c.nullable))
 }
 
+/// # Safety
+/// `reader` must be null or a live handle with exclusive access for this call.
 #[no_mangle]
-pub extern "C" fn file_sql_parquet_next(reader: *mut FileSqlParquetReader) -> i32 {
+pub unsafe extern "C" fn file_sql_parquet_next(reader: *mut FileSqlParquetReader) -> i32 {
     // SAFETY: Null is checked and the caller owns a live reader.
     let Some(reader) = (unsafe { reader.as_mut() }) else {
         return -1;
@@ -317,8 +336,11 @@ pub extern "C" fn file_sql_parquet_next(reader: *mut FileSqlParquetReader) -> i3
     }
 }
 
+/// # Safety
+/// `reader` must be a live handle without concurrent mutable access. `data`,
+/// `length`, and `is_null` must each reference writable output storage.
 #[no_mangle]
-pub extern "C" fn file_sql_parquet_cell(
+pub unsafe extern "C" fn file_sql_parquet_cell(
     reader: *const FileSqlParquetReader,
     column: usize,
     data: *mut *const u8,
@@ -344,8 +366,11 @@ pub extern "C" fn file_sql_parquet_cell(
     0
 }
 
+/// # Safety
+/// `reader` must be a live handle without concurrent mutable access. If
+/// non-null, `output` must reference `capacity` writable bytes.
 #[no_mangle]
-pub extern "C" fn file_sql_parquet_error(
+pub unsafe extern "C" fn file_sql_parquet_error(
     reader: *const FileSqlParquetReader,
     output: *mut i8,
     capacity: usize,
@@ -390,7 +415,7 @@ mod tests {
         assert_eq!(reader.columns[0].kind, 2);
         assert!(reader.columns[0].nullable);
         let mut observed = Vec::new();
-        while file_sql_parquet_next(&mut reader) == 1 {
+        while unsafe { file_sql_parquet_next(&mut reader) } == 1 {
             observed.push(if reader.nulls[0] {
                 None
             } else {
