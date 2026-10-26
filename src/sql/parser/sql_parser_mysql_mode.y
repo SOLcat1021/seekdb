@@ -17559,9 +17559,15 @@ file_sql_option
 ;
 
 file_sql_option:
-relation_name '=' simple_expr
+NAME_OB '=' simple_expr
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, $1, $3);
+}
+| FORMAT '=' simple_expr
+{
+  get_non_reserved_node($$, result->malloc_pool_, @1.first_column, @1.last_column);
+  ParseNode *name = $$;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, name, $3);
 }
 ;
 

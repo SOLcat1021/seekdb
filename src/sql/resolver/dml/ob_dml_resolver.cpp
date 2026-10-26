@@ -7044,6 +7044,8 @@ int ObDMLResolver::resolve_function_table_column_item(const TableItem &table_ite
     // do nothing ...
   } else if (NULL != (col_item = stmt->get_column_item(table_item.table_id_, column_name))) {
     //exist, ignore resolve...
+  } else if (table_item.file_sql_kind_ != 0) {
+    ret = OB_ERR_BAD_FIELD_ERROR;
   } else {
     ObSEArray<ColumnItem, 16> col_items;
     OZ (ObResolverUtils::check_function_table_column_exist(table_item,
@@ -8643,9 +8645,21 @@ int ObDMLResolver::get_columns_from_table_item(const TableItem *table_item, ObIA
       }
     }
   } else if (table_item->is_function_table()) {
-    OZ (ObResolverUtils::get_all_function_table_column_names(*table_item,
-                                                             params_,
-                                                             column_names));
+    if (table_item->file_sql_kind_ != 0) {
+      const ObDMLStmt *stmt = get_stmt();
+      for (int64_t i = 0; OB_SUCC(ret) && i < stmt->get_column_size(); ++i) {
+        const ColumnItem *column = stmt->get_column_item(i);
+        if (OB_ISNULL(column)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (column->table_id_ == table_item->table_id_) {
+          OZ(column_names.push_back(column->column_name_));
+        }
+      }
+    } else {
+      OZ (ObResolverUtils::get_all_function_table_column_names(*table_item,
+                                                               params_,
+                                                               column_names));
+    }
   } else if (table_item->is_basic_table() || table_item->is_fake_cte_table()) {
     /**
      * LINK_TABLE and CTE_TABLE is same as BASIC_TABLE or ALIAS_TABLE
