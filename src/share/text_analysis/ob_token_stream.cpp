@@ -66,7 +66,8 @@ int ObTextTokenizer::open(const ObDatum &document, const ObCharsetInfo *cs)
 ObTextWhitespaceTokenizer::ObTextWhitespaceTokenizer()
   : ObTextTokenizer(),
     curr_token_ptr_(nullptr),
-    trav_pos_(0)
+    trav_pos_(0),
+    fast_ascii_(false)
 {
 }
 
@@ -74,6 +75,7 @@ void ObTextWhitespaceTokenizer::reset()
 {
   curr_token_ptr_ = nullptr;
   trav_pos_ = 0;
+  fast_ascii_ = false;
   ObTextTokenizer::reset();
 }
 
@@ -82,6 +84,8 @@ int ObTextWhitespaceTokenizer::inner_open(const ObDatum &document, const ObChars
   int ret = OB_SUCCESS;
   curr_token_ptr_ = nullptr;
   trav_pos_ = 0;
+  fast_ascii_ = nullptr != cs && nullptr != cs->csname
+                && CHARSET_UTF8MB4 == ObCharset::charset_type(cs->csname);
   return ret;
 }
 
@@ -98,12 +102,11 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
     int64_t token_len = 0;
     // to next non-whitespace pos
     while (OB_SUCC(ret) && found_delimiter()) {
-      // ASCII bytes are single-byte characters in UTF-8. Keep the charset
-      // decoder for all other bytes and charsets, including malformed input.
-      const unsigned char c = static_cast<unsigned char>(doc[trav_pos_]);
-      const int64_t c_len = (c < 0x80 && (cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI
-                                         || cs_->number == CS_TYPE_UTF8MB4_BIN))
-          ? 1 : ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
+      const unsigned char ch = static_cast<unsigned char>(doc[trav_pos_]);
+      int64_t c_len = 1;
+      if (!fast_ascii_ || ch >= 0x80) {
+        c_len = ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
+      }
       trav_pos_ += c_len;
       if (trav_pos_ >= doc_len || 0 == c_len) {// if char is invalid, just skip the rest of document
         iter_end_ = true;
@@ -117,12 +120,11 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
 
     // to next whitespace pos
     while (OB_SUCC(ret) && !found_delimiter()) {
-      // ASCII bytes are single-byte characters in UTF-8. Keep the charset
-      // decoder for all other bytes and charsets, including malformed input.
-      const unsigned char c = static_cast<unsigned char>(doc[trav_pos_]);
-      const int64_t c_len = (c < 0x80 && (cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI
-                                         || cs_->number == CS_TYPE_UTF8MB4_BIN))
-          ? 1 : ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
+      const unsigned char ch = static_cast<unsigned char>(doc[trav_pos_]);
+      int64_t c_len = 1;
+      if (!fast_ascii_ || ch >= 0x80) {
+        c_len = ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
+      }
       trav_pos_ += c_len;
       token_len += c_len;
       if (trav_pos_ >= doc_len || 0 == c_len) {
