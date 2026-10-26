@@ -43,6 +43,7 @@
 #include "sql/hybrid_search/ob_hybrid_search_executor.h"
 #include "sql/engine/basic/ob_file_sql_csv_reader.h"
 #include "sql/engine/basic/ob_file_sql_jsonl_reader.h"
+#include "sql/engine/basic/ob_file_sql_parquet_reader.h"
 #include <cstdlib>
 #include <filesystem>
 #include <algorithm>
@@ -4071,6 +4072,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
   std::string canonical_root;
   file_sql::CsvReader reader;
   file_sql::JsonlReader json_reader;
+  file_sql::ParquetReader parquet_reader;
   file_sql::CsvOptions csv_options;
   std::string scan_error;
   const int64_t file_kind = OB_NOT_NULL(parse_tree.children_) &&
@@ -4085,7 +4087,8 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
   } else if (!enabled) {
     ret = OB_NOT_SUPPORTED;
     LOG_USER_ERROR(OB_NOT_SUPPORTED, "file SQL is disabled");
-  } else if (file_kind != 1 && file_kind != 2 && file_kind != 3 && file_kind != 5) {
+  } else if (file_kind != 1 && file_kind != 2 && file_kind != 3 &&
+             file_kind != 4 && file_kind != 5) {
     ret = OB_NOT_SUPPORTED;
     LOG_USER_ERROR(OB_NOT_SUPPORTED, "this file SQL format");
   } else if (path_node->type_ != T_VARCHAR || OB_ISNULL(path_node->str_value_) ||
@@ -4136,7 +4139,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
       if (file_kind == 1 && name.case_compare("header") == 0 &&
           (value_node->type_ == T_BOOL || value_node->type_ == T_INT)) {
         csv_options.header = value_node->value_ != 0;
-      } else if (file_kind != 5 && name.case_compare("sample_size") == 0) {
+      } else if (file_kind >= 1 && file_kind <= 3 && name.case_compare("sample_size") == 0) {
         const bool full_sample = value_node->type_ == T_OP_NEG &&
                                  value_node->num_child_ == 1 &&
                                  OB_NOT_NULL(value_node->children_[0]) &&
@@ -4218,6 +4221,11 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
               !json_reader.infer_schema(scan_error))) {
     ret = OB_ERR_PARSE_SQL;
     LOG_WARN("failed to inspect JSONL file", K(ret), K(scan_error.c_str()));
+  } else if (file_kind == 4 &&
+             (!parquet_reader.open(canonical_path, scan_error) ||
+              !parquet_reader.infer_schema(scan_error))) {
+    ret = OB_ERR_PARSE_SQL;
+    LOG_WARN("failed to inspect Parquet file", K(ret), K(scan_error.c_str()));
   } else if (OB_FAIL(resolve_sql_expr(*path_node, path_expr))) {
   } else if (OB_ISNULL(item = stmt->create_table_item(*allocator_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
@@ -4230,12 +4238,16 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
     item->file_sql_delimiter_ = csv_options.delimiter;
     item->file_sql_quote_ = csv_options.quote;
     item->file_sql_size_ = file_kind == 1 ? reader.file_size() :
+                           file_kind == 4 ? parquet_reader.file_size() :
                            file_kind == 5 ? 0 : json_reader.file_size();
     item->file_sql_mtime_ = file_kind == 1 ? reader.file_mtime() :
+                            file_kind == 4 ? parquet_reader.file_mtime() :
                             file_kind == 5 ? 0 : json_reader.file_mtime();
     item->file_sql_device_ = file_kind == 1 ? reader.file_device() :
+                             file_kind == 4 ? parquet_reader.file_device() :
                              file_kind == 5 ? 0 : json_reader.file_device();
     item->file_sql_inode_ = file_kind == 1 ? reader.file_inode() :
+                            file_kind == 4 ? parquet_reader.file_inode() :
                             file_kind == 5 ? 0 : json_reader.file_inode();
     if (!csv_options.null_text.empty()) {
       OZ(ob_write_string(*allocator_, ObString::make_string(csv_options.null_text.c_str()),
@@ -4257,6 +4269,7 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree,
     const std::vector<file_sql::CsvColumn> glob_columns =
         {{"file", file_sql::CsvType::VARCHAR}};
     const std::vector<file_sql::CsvColumn> &columns = file_kind == 1 ? reader.columns() :
+        file_kind == 4 ? parquet_reader.columns() :
         file_kind == 5 ? glob_columns : json_reader.columns();
     for (size_t i = 0; OB_SUCC(ret) && i < columns.size(); ++i) {
       const file_sql::CsvColumn &column = columns[i];

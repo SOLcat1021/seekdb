@@ -22,6 +22,7 @@
 #include "lib/charset/ob_charset.h"
 #include "sql/engine/basic/ob_file_sql_csv_reader.h"
 #include "sql/engine/basic/ob_file_sql_jsonl_reader.h"
+#include "sql/engine/basic/ob_file_sql_parquet_reader.h"
 
 namespace oceanbase
 {
@@ -86,6 +87,7 @@ private:
   pl::ObPLCollection *value_table_;
   file_sql::CsvReader csv_reader_;
   file_sql::JsonlReader json_reader_;
+  file_sql::ParquetReader parquet_reader_;
   std::vector<std::string> glob_paths_;
   size_t glob_index_ = 0;
   std::vector<std::string> csv_values_;

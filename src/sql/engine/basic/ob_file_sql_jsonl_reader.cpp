@@ -1,3 +1,14 @@
+/* Copyright (c) 2026 OceanBase.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "sql/engine/basic/ob_file_sql_jsonl_reader.h"
 
 #include <rapidjson/document.h>
@@ -207,8 +218,10 @@ bool JsonlReader::infer_schema(std::string &error)
   std::string line;
   std::vector<Field> fields;
   bool end = false;
+  size_t row_count = 0;
   while (read_line(line, end, error) && !end) {
     if (!parse_line(line, fields, error)) return false;
+    std::vector<bool> present(columns_.size(), false);
     for (const Field &field : fields) {
       const std::string key = ascii_lower(field.name);
       const auto found = column_index_.find(key);
@@ -218,11 +231,18 @@ bool JsonlReader::infer_schema(std::string &error)
           return false;
         }
         column_index_[key] = columns_.size();
-        columns_.push_back({field.name, field.type});
+        columns_.push_back({field.name, field.type, field.is_null || row_count > 0});
+        present.push_back(true);
       } else {
         columns_[found->second].type = widen_csv_type(columns_[found->second].type, field.type);
+        columns_[found->second].nullable |= field.is_null;
+        present[found->second] = true;
       }
     }
+    for (size_t index = 0; index < present.size(); ++index) {
+      if (!present[index]) columns_[index].nullable = true;
+    }
+    ++row_count;
   }
   if (!error.empty() || columns_.empty() || !check_unchanged(error)) {
     if (columns_.empty() && error.empty()) error = "JSONL file has no columns";

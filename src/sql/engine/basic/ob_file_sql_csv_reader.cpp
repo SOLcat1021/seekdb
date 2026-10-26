@@ -1,3 +1,14 @@
+/* Copyright (c) 2026 OceanBase.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "sql/engine/basic/ob_file_sql_csv_reader.h"
 
 #include <cerrno>
@@ -347,8 +358,8 @@ bool CsvReader::infer_schema(std::string &error)
   initialize_columns(values);
   if (!options_.header) {
     for (size_t i = 0; i < values.size(); ++i) {
-      columns_[i].type = is_null_value(values[i], quoted_fields_[i]) ?
-                         CsvType::NULL_TYPE :
+      columns_[i].nullable = is_null_value(values[i], quoted_fields_[i]);
+      columns_[i].type = columns_[i].nullable ? CsvType::NULL_TYPE :
                          (values[i].empty() ? CsvType::VARCHAR : classify_csv_value(values[i]));
     }
   }
@@ -358,7 +369,9 @@ bool CsvReader::infer_schema(std::string &error)
       return false;
     }
     for (size_t i = 0; i < values.size(); ++i) {
-      if (!is_null_value(values[i], quoted_fields_[i])) {
+      if (is_null_value(values[i], quoted_fields_[i])) {
+        columns_[i].nullable = true;
+      } else {
         columns_[i].type = widen_csv_type(columns_[i].type,
             values[i].empty() ? CsvType::VARCHAR : classify_csv_value(values[i]));
       }

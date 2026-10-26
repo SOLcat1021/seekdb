@@ -98,7 +98,7 @@ int ObFunctionTableOp::inner_open()
   int ret = OB_SUCCESS;
   node_idx_ = 0;
   already_calc_ = false;
-  if (MY_SPEC.file_sql_kind_ >= 1 && MY_SPEC.file_sql_kind_ <= 3) {
+  if (MY_SPEC.file_sql_kind_ >= 1 && MY_SPEC.file_sql_kind_ <= 4) {
     std::string error;
     std::string path(MY_SPEC.file_sql_path_.ptr(), MY_SPEC.file_sql_path_.length());
     file_sql::CsvOptions options;
@@ -109,17 +109,21 @@ int ObFunctionTableOp::inner_open()
       options.null_text.assign(MY_SPEC.file_sql_null_text_.ptr(), MY_SPEC.file_sql_null_text_.length());
     }
     const bool csv = MY_SPEC.file_sql_kind_ == 1;
+    const bool parquet = MY_SPEC.file_sql_kind_ == 4;
     const bool opened = csv ? csv_reader_.open(path, options, error) :
-                              json_reader_.open(path, error);
+                        parquet ? parquet_reader_.open(path, error) :
+                                  json_reader_.open(path, error);
     const bool same_file = opened &&
-        (csv ? csv_reader_.file_size() : json_reader_.file_size()) == MY_SPEC.file_sql_size_ &&
-        (csv ? csv_reader_.file_mtime() : json_reader_.file_mtime()) == MY_SPEC.file_sql_mtime_ &&
-        (csv ? csv_reader_.file_device() : json_reader_.file_device()) == MY_SPEC.file_sql_device_ &&
-        (csv ? csv_reader_.file_inode() : json_reader_.file_inode()) == MY_SPEC.file_sql_inode_;
+        (csv ? csv_reader_.file_size() : parquet ? parquet_reader_.file_size() : json_reader_.file_size()) == MY_SPEC.file_sql_size_ &&
+        (csv ? csv_reader_.file_mtime() : parquet ? parquet_reader_.file_mtime() : json_reader_.file_mtime()) == MY_SPEC.file_sql_mtime_ &&
+        (csv ? csv_reader_.file_device() : parquet ? parquet_reader_.file_device() : json_reader_.file_device()) == MY_SPEC.file_sql_device_ &&
+        (csv ? csv_reader_.file_inode() : parquet ? parquet_reader_.file_inode() : json_reader_.file_inode()) == MY_SPEC.file_sql_inode_;
     if (opened && !same_file) error = "file changed since schema inference";
     const bool inferred = same_file &&
-        (csv ? csv_reader_.infer_schema(error) : json_reader_.infer_schema(error));
-    const size_t column_count = csv ? csv_reader_.columns().size() : json_reader_.columns().size();
+        (csv ? csv_reader_.infer_schema(error) :
+         parquet ? parquet_reader_.infer_schema(error) : json_reader_.infer_schema(error));
+    const size_t column_count = csv ? csv_reader_.columns().size() :
+                                parquet ? parquet_reader_.columns().size() : json_reader_.columns().size();
     if (!inferred || column_count != static_cast<size_t>(MY_SPEC.column_exprs_.count())) {
       ret = OB_ERR_PARSE_SQL;
       LOG_WARN("failed to open file SQL scan", K(ret), K(error.c_str()));
@@ -179,9 +183,11 @@ int ObFunctionTableOp::inner_rescan()
   } else {
     node_idx_ = 0;
     glob_index_ = 0;
-    if (MY_SPEC.file_sql_kind_ >= 1 && MY_SPEC.file_sql_kind_ <= 3) {
+    if (MY_SPEC.file_sql_kind_ >= 1 && MY_SPEC.file_sql_kind_ <= 4) {
       std::string error;
-      if (!(MY_SPEC.file_sql_kind_ == 1 ? csv_reader_.rewind(error) : json_reader_.rewind(error))) {
+      if (!(MY_SPEC.file_sql_kind_ == 1 ? csv_reader_.rewind(error) :
+            MY_SPEC.file_sql_kind_ == 4 ? parquet_reader_.rewind(error) :
+                                          json_reader_.rewind(error))) {
         ret = OB_ERR_PARSE_SQL;
         LOG_WARN("failed to rewind file SQL scan", K(ret), K(error.c_str()));
       }
@@ -205,6 +211,7 @@ int ObFunctionTableOp::inner_close()
   value_table_ = NULL;
   csv_reader_.close();
   json_reader_.close();
+  parquet_reader_.close();
   glob_paths_.clear();
   glob_index_ = 0;
   return ret;
@@ -271,6 +278,8 @@ int ObFunctionTableOp::inner_get_next_row_file_sql()
     return ret;
   } else if (!(MY_SPEC.file_sql_kind_ == 1 ?
                csv_reader_.next(csv_values_, csv_nulls_, end, error) :
+               MY_SPEC.file_sql_kind_ == 4 ?
+               parquet_reader_.next(csv_values_, csv_nulls_, end, error) :
                json_reader_.next(csv_values_, csv_nulls_, end, error))) {
     ret = OB_ERR_PARSE_SQL;
     LOG_WARN("failed to read file SQL row", K(ret), K(error.c_str()));

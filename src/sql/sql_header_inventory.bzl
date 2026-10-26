@@ -474,6 +474,7 @@ SQL_PRIVATE_HEADERS = [
     "engine/basic/ob_function_table_op.h",
     "engine/basic/ob_file_sql_csv_reader.h",
     "engine/basic/ob_file_sql_jsonl_reader.h",
+    "engine/basic/ob_file_sql_parquet_reader.h",
     "engine/basic/ob_group_join_buffer.h",
     "engine/basic/ob_hash_partitioning_basic.h",
     "engine/basic/ob_hash_partitioning_infrastructure_op.h",
