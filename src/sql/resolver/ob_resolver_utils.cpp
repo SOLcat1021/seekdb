@@ -6063,8 +6063,10 @@ int ObResolverUtils::check_secure_path(const common::ObString &secure_file_priv,
     MEMCPY(buf, secure_file_priv.ptr(), secure_file_priv.length());
 
     struct stat path_stat;
-    stat(buf, &path_stat);
-    if (0 == S_ISDIR(path_stat.st_mode)) {
+    // A failed stat must not leave path_stat uninitialized: secure path
+    // validation is a fail-closed check and only an existing directory is a
+    // valid secure_file_priv value.
+    if (0 != stat(buf, &path_stat) || !S_ISDIR(path_stat.st_mode)) {
       ret = OB_ERR_NO_PRIVILEGE;
     } else {
       MEMSET(buf, 0, sizeof(buf));
@@ -6118,8 +6120,8 @@ int ObResolverUtils::check_secure_path(const common::ObString &secure_file_priv,
     for (int i = 0; OB_ERR_NO_PRIVILEGE == ret && i < list_size; i++) {
       const char * const secure_file_path = server_secure_path_allowlist[i];
       struct stat path_stat;
-      stat(secure_file_path, &path_stat);
-      if (0 == S_ISDIR(path_stat.st_mode)) {
+      // An unavailable allowlist entry cannot authorize a path.
+      if (0 != stat(secure_file_path, &path_stat) || !S_ISDIR(path_stat.st_mode)) {
         // continue
       } else {
         MEMSET(buf, 0, sizeof(buf));
