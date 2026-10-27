@@ -2433,7 +2433,10 @@ int ObDDLResolver::resolve_ai_column_attribute(ObColumnSchemaV2 &column,
       ret = OB_ERR_PARSER_SYNTAX;
     } else if (is_generic_function && (OB_ISNULL(args_node) || T_EXPR_LIST != args_node->type_)) {
       ret = OB_ERR_PARSER_SYNTAX;
-    } else if (is_embed && ObVectorType != column.get_data_type()) {
+    // VECTOR columns are represented by the SQL collection object type.  The
+    // concrete vector shape is kept in the collection metadata, rather than
+    // in a separate ObObjType enum value.
+    } else if (is_embed && ObCollectionSQLType != column.get_data_type()) {
       ret = OB_ERR_INVALID_TYPE_FOR_OP;
       LOG_USER_ERROR(OB_ERR_INVALID_TYPE_FOR_OP);
     } else if (is_embed && is_generic_function && 3 == args_node->num_child_
