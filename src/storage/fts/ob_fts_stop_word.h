@@ -123,7 +123,10 @@ private:
   {
   public:
     explicit UpdateWordCount(const int64_t word_cnt) : word_cnt_(word_cnt) {}
-    void operator()(int64_t &word_count) const { word_count += word_cnt_; }
+    void operator()(common::hash::HashMapPair<ObFTWord, int64_t> &entry) const
+    {
+      entry.second += word_cnt_;
+    }
 
   private:
     int64_t word_cnt_;
