@@ -374,8 +374,16 @@ int ObExprTokenize::TokenizeParam::reform_parser_properties(const ObString &prop
 {
   int ret = OB_SUCCESS;
   storage::ObFTParserJsonProps parser_properties;
+  storage::ObFTParser parser;
 
-  if (OB_FAIL(parser_properties.init())) {
+  // The BENG parser helper already supplies the same defaults when its
+  // properties are empty. Avoid building and reparsing a JSON object for
+  // every TOKENIZE call in that common case.
+  if (properties.empty()
+      && OB_FAIL(parser.parse_from_str(parser_name_.ptr(), parser_name_.length()))) {
+  } else if (properties.empty() && parser.is_beng()) {
+    properties_ = properties;
+  } else if (OB_FAIL(parser_properties.init())) {
   } else if (OB_FAIL(parser_properties.parse_from_valid_str(properties))) {
     LOG_USER_ERROR(OB_INVALID_ARGUMENT, "parser properties invalid.");
   } else if (OB_FAIL(parser_properties.rebuild_props_for_ddl(parser_name_,
