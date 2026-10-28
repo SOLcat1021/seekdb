@@ -153,10 +153,11 @@ int ObIKArbitrator::output_result(TokenizeContext &ctx)
                                                                  ctx.fulltext() + current,
                                                                  char_len,
                                                                  is_ignore))) {
-          } else if (!is_ignore && !FALSE_IT(token.type_ = ObIKTokenType::IK_OTHER_CJK_TOKEN)
-                     && OB_FAIL(ctx.result_list().push_back(token))) {
-          } else {
-            // ignore
+          }
+          if (OB_SUCC(ret) && !is_ignore) {
+            token.type_ = ObIKTokenType::IK_OTHER_CJK_TOKEN;
+            if (OB_FAIL(ctx.result_list().push_back(token))) {
+            }
           }
         }
       }
