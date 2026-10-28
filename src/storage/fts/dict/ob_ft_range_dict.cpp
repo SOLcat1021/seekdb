@@ -111,7 +111,8 @@ public:
 
       if (OB_FAIL(builder.init(*trie))) {
       } else if (OB_FAIL(builder.build_from_trie(*trie))) {
-      } else if (OB_FAIL(builder.get_mem_block(dat_buff, buffer_size))) {
+      } else if (OB_FAIL(builder.get_mem_block(dat_buff, buffer_size,
+                                              ObFTDictType::DICT_IK_MAIN == desc_->type_))) {
       } else if (OB_FAIL(ObFTCacheDict::make_and_fetch_cache_entry(*desc_,
                                                                     dat_buff,
                                                                     buffer_size,
@@ -284,7 +285,8 @@ int ObFTRangeDict::build_one_range(const ObFTDictDesc &desc,
     // to do clean up
   } else if (OB_FAIL(builder.init(trie))) {
   } else if (OB_FAIL(builder.build_from_trie(trie))) {
-  } else if (OB_FAIL(builder.get_mem_block(dat_buff, buffer_size))) {
+  } else if (OB_FAIL(builder.get_mem_block(dat_buff, buffer_size,
+                                          ObFTDictType::DICT_IK_MAIN == desc.type_))) {
   } else if (OB_FAIL(container.fetch_info_for_dict(info))) {
   } else if (OB_FAIL(ObFTCacheDict::make_and_fetch_cache_entry(desc,
                                                                dat_buff,
@@ -381,6 +383,27 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
+  if (fast_range_lookup_ && 3 == single_word.length()) {
+    const unsigned char *bytes = reinterpret_cast<const unsigned char *>(single_word.ptr());
+    const uint32_t key = (static_cast<uint32_t>(bytes[0]) << 16)
+                       | (static_cast<uint32_t>(bytes[1]) << 8) | bytes[2];
+    int64_t left = 0;
+    int64_t right = range_dicts_.size();
+    while (left < right) {
+      const int64_t mid = left + (right - left) / 2;
+      if (range_dicts_[mid].end_key_ < key) {
+        left = mid + 1;
+      } else {
+        right = mid;
+      }
+    }
+    if (left < range_dicts_.size() && range_dicts_[left].start_key_ <= key) {
+      dict = range_dicts_[left].dict_;
+    } else {
+      ret = OB_ENTRY_NOT_EXIST;
+    }
+    return ret;
+  }
   bool found = false;
   for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
     if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
@@ -418,8 +441,29 @@ int ObFTRangeDict::build_dict_from_cache(const ObFTCacheRangeContainer &range_co
       range.start_ = dat->start_word_;
       range.end_ = dat->end_word_;
       range.dict_ = dict;
+      range.start_key_ = 0;
+      range.end_key_ = 0;
+      if (3 == range.start_.word_len && 3 == range.end_.word_len) {
+        const unsigned char *start = reinterpret_cast<const unsigned char *>(range.start_.word);
+        const unsigned char *end = reinterpret_cast<const unsigned char *>(range.end_.word);
+        range.start_key_ = (static_cast<uint32_t>(start[0]) << 16)
+                           | (static_cast<uint32_t>(start[1]) << 8) | start[2];
+        range.end_key_ = (static_cast<uint32_t>(end[0]) << 16)
+                         | (static_cast<uint32_t>(end[1]) << 8) | end[2];
+      }
       if (OB_FAIL(range_dicts_.push_back(range))) {
       }
+    }
+  }
+  if (OB_SUCC(ret) && ObFTDictType::DICT_IK_MAIN == desc_.type_
+      && ObCollationType::CS_TYPE_UTF8MB4_BIN == desc_.coll_type_
+      && range_dicts_.size() > 0) {
+    fast_range_lookup_ = true;
+    for (int64_t i = 0; fast_range_lookup_ && i < range_dicts_.size(); ++i) {
+      const ObFTRange &range = range_dicts_[i];
+      fast_range_lookup_ = 3 == range.start_.word_len && 3 == range.end_.word_len
+                           && range.start_key_ <= range.end_key_
+                           && (0 == i || range_dicts_[i - 1].end_key_ < range.start_key_);
     }
   }
   return ret;

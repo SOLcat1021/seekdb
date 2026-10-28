@@ -66,6 +66,7 @@ public:
   int insert(const ObString &key, ObFTWordCode code);
 
   int find(const ObFTSingleWord &word, ObFTWordCode &code) const;
+  void fill_utf8_code_table(ObFTWordCode *codes) const;
 
 private:
   struct Header header_;
@@ -94,6 +95,7 @@ public:
   size_t map_offset_ = 0;
   size_t base_offset_ = 0;
   size_t check_offset_ = 0;
+  size_t utf8_codes_offset_ = 0;
 
   // use if offset is not 0, it means the data is in the data block
   size_t data_index_offset_ = 0;
@@ -106,6 +108,11 @@ public:
 
 public:
   ObArrayHashMap *get_map();
+  const ObFTWordCode *get_utf8_codes() const
+  {
+    return 0 == utf8_codes_offset_ ? nullptr : reinterpret_cast<const ObFTWordCode *>(
+        reinterpret_cast<const char *>(this) + utf8_codes_offset_);
+  }
 } __attribute__((packed));
 
 template <typename DataType>
@@ -131,19 +138,24 @@ public:
   int build_from_trie(ObFTTrie<DATA_TYPE> &trie);
 
   // get and put to kv_cache
-  int get_mem_block(ObFTDAT *&mem, size_t &mem_len)
+  int get_mem_block(ObFTDAT *&mem, size_t &mem_len, bool build_utf8_codes = false)
   {
+    int ret = OB_SUCCESS;
+    if (build_utf8_codes && nullptr != dat_ && 0 == dat_->utf8_codes_offset_) {
+      ret = add_utf8_code_table();
+    }
     mem = dat_;
     if (nullptr == dat_) {
       mem_len = 0;
     } else {
       mem_len = dat_->mem_block_size_;
     }
-    return OB_SUCCESS;
+    return ret;
   }
 
 private:
   int expand();
+  int add_utf8_code_table();
 
   int encode(const ObString &word, ObFTWordCode &code, bool add);
 

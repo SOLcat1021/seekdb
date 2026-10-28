@@ -194,6 +194,32 @@ int ObFTDATBuilder<DATA_TYPE>::build_from_trie(ObFTTrie<DATA_TYPE> &trie)
 }
 
 template <typename DATA_TYPE>
+int ObFTDATBuilder<DATA_TYPE>::add_utf8_code_table()
+{
+  int ret = OB_SUCCESS;
+  const size_t offset = (dat_->mem_block_size_ + alignof(ObFTWordCode) - 1)
+                      & ~(alignof(ObFTWordCode) - 1);
+  const size_t table_size = 65536 * sizeof(ObFTWordCode);
+  const size_t buffer_size = offset + table_size;
+  ObFTDAT *new_dat = static_cast<ObFTDAT *>(alloc_.alloc(buffer_size));
+  if (OB_ISNULL(new_dat)) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    MEMCPY(new_dat, dat_, dat_->mem_block_size_);
+    new_dat->mem_block_size_ = buffer_size;
+    new_dat->utf8_codes_offset_ = offset;
+    ObFTWordCode *codes = reinterpret_cast<ObFTWordCode *>(
+        reinterpret_cast<char *>(new_dat) + offset);
+    memset(codes, 0, table_size);
+    new_dat->get_map()->fill_utf8_code_table(codes);
+    alloc_.free(dat_);
+    dat_ = new_dat;
+    map_ = dat_->get_map();
+  }
+  return ret;
+}
+
+template <typename DATA_TYPE>
 int ObFTDATBuilder<DATA_TYPE>::expand()
 {
   int ret = OB_SUCCESS;
@@ -260,7 +286,17 @@ int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
 
   ObFTSingleWord word;
   word.set_word(ft_char.ptr(), ft_char.length());
-  if (OB_FAIL(dat_->get_map()->find(word, code)) && OB_ENTRY_NOT_EXIST != ret) {
+  const ObFTWordCode *utf8_codes = dat_->get_utf8_codes();
+  if (OB_NOT_NULL(utf8_codes) && 3 == ft_char.length()
+      && (static_cast<uint8_t>(ft_char.ptr()[0]) & 0xF0) == 0xE0) {
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(ft_char.ptr());
+    const uint32_t cp = ((bytes[0] & 0x0F) << 12) | ((bytes[1] & 0x3F) << 6) | (bytes[2] & 0x3F);
+    code = utf8_codes[cp];
+    ret = 0 == code ? OB_ENTRY_NOT_EXIST : OB_SUCCESS;
+  } else {
+    ret = dat_->get_map()->find(word, code);
+  }
+  if (OB_FAIL(ret) && OB_ENTRY_NOT_EXIST != ret) {
   } else if (OB_ENTRY_NOT_EXIST == ret) {
     ret = OB_SUCCESS;
     hit.set_unmatch();
@@ -314,6 +350,18 @@ int ObArrayHashMap::find(const ObFTSingleWord &word, ObFTWordCode &code) const
     }
   }
   return ret;
+}
+
+void ObArrayHashMap::fill_utf8_code_table(ObFTWordCode *codes) const
+{
+  for (uint32_t i = 0; i < header_.capacity_; ++i) {
+    const Entry &entry = header_.data[i];
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(entry.word.word);
+    if (entry.used && 3 == entry.word.word_len && (bytes[0] & 0xF0) == 0xE0) {
+      const uint32_t cp = ((bytes[0] & 0x0F) << 12) | ((bytes[1] & 0x3F) << 6) | (bytes[2] & 0x3F);
+      codes[cp] = entry.code;
+    }
+  }
 }
 
 int ObArrayHashMap::insert(const ObString &key, ObFTWordCode code)
