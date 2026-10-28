@@ -1496,6 +1496,10 @@ int ObDASIterUtils::create_text_retrieval_sub_tree(
     if (ir_scan_ctdef->has_pushdown_topk() && !has_duplicate_boolean_tokens) {
       merge_iter_param.topk_mode_ = 1;
       merge_iter_param.daat_mode_ = 1;
+    } else if (!is_func_lookup && NATURAL_LANGUAGE_MODE == ir_scan_ctdef->mode_flag_
+               && !ir_scan_ctdef->need_calc_relevance()) {
+      // Score-free retrieval avoids the score-dependent TAAT setup even with many tokens.
+      merge_iter_param.daat_mode_ = 1;
     } else if (merge_iter_param.query_tokens_.count() > OB_MAX_TEXT_RETRIEVAL_TOKEN_CNT
         || (!is_func_lookup && !ir_scan_ctdef->need_proj_relevance_score())) {
       if (BOOLEAN_MODE == ir_scan_ctdef->mode_flag_) {
