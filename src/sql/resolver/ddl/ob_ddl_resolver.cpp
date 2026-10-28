@@ -2429,6 +2429,7 @@ int ObDDLResolver::resolve_ai_column_attribute(ObColumnSchemaV2 &column,
         || (is_generic_function && 0 == func_name.case_compare("ai_embed"));
     ParseNode *args_node = is_generic_function ? expr_node->children_[1] : nullptr;
     int64_t max_retries = 3;
+    int64_t vector_dimension = 0;
     if (!is_complete && !is_embed) {
       ret = OB_ERR_PARSER_SYNTAX;
     } else if (is_generic_function && (OB_ISNULL(args_node) || T_EXPR_LIST != args_node->type_)) {
@@ -2439,12 +2440,14 @@ int ObDDLResolver::resolve_ai_column_attribute(ObColumnSchemaV2 &column,
     } else if (is_embed && ObCollectionSQLType != column.get_data_type()) {
       ret = OB_ERR_INVALID_TYPE_FOR_OP;
       LOG_USER_ERROR(OB_ERR_INVALID_TYPE_FOR_OP);
+    } else if (is_embed && OB_FAIL(ObVectorIndexUtil::get_vector_dim_from_extend_type_info(
+                   column.get_extended_type_info(), vector_dimension))) {
     } else if (is_embed && is_generic_function && 3 == args_node->num_child_
                && OB_NOT_NULL(args_node->children_[2]) && T_INT == args_node->children_[2]->type_
-               && args_node->children_[2]->value_ != column.get_accuracy().get_length()) {
+               && args_node->children_[2]->value_ != vector_dimension) {
       ret = OB_ERR_INVALID_VECTOR_DIM;
       LOG_USER_ERROR(OB_ERR_INVALID_VECTOR_DIM,
-                     static_cast<uint32_t>(column.get_accuracy().get_length()),
+                     static_cast<uint32_t>(vector_dimension),
                      static_cast<uint32_t>(args_node->children_[2]->value_));
     } else if (OB_FAIL(parse_ai_column_options(attr_node->children_[1], max_retries))) {
     } else {

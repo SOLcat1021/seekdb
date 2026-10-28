@@ -94,6 +94,8 @@
 #include "sql/resolver/cmd/ob_get_diagnostics_resolver.h"
 #include "sql/resolver/dcl/ob_alter_role_resolver.h"
 #include "sql/pl/ob_pl_package.h"
+#include "sql/engine/dml/ai_column_write_guard.h"
+#include "common/mysqlclient/ob_mysql_proxy.h"
 
 namespace oceanbase
 {
@@ -101,6 +103,92 @@ using namespace common;
 using namespace share;
 namespace sql
 {
+namespace
+{
+int ai_column_append_quoted_name(ObSqlString &sql, const ObString &name)
+{
+  int ret = sql.append("`");
+  for (int64_t i = 0; OB_SUCC(ret) && i < name.length(); ++i) {
+    if (name.ptr()[i] == '`' && OB_FAIL(sql.append("`"))) {
+    } else if (OB_FAIL(sql.append(name.ptr() + i, 1))) {
+    }
+  }
+  if (OB_SUCC(ret)) { ret = sql.append("`"); }
+  return ret;
+}
+
+int check_ai_column_strict_read(ObResolverParams &params, const ObDMLStmt &stmt)
+{
+  int ret = OB_SUCCESS;
+  ObObj strict_value;
+  if (ai_column_internal_write || OB_ISNULL(params.session_info_)
+      || params.session_info_->is_ai_column_internal_write()) {
+  } else if (OB_FAIL(params.session_info_->get_sys_variable(
+      SYS_VAR_AI_COLUMN_STRICT_READ, strict_value))) {
+  } else if (strict_value.get_int() != 0) {
+    for (int64_t i = 0; OB_SUCC(ret) && i < stmt.get_column_items().count(); ++i) {
+      const ColumnItem &item = stmt.get_column_items().at(i);
+      const ObTableSchema *table = nullptr;
+      const ObDatabaseSchema *database = nullptr;
+      const ObColumnSchemaV2 *column = nullptr;
+      if (OB_INVALID_ID == item.base_tid_ || OB_INVALID_ID == item.base_cid_) {
+        continue;
+      } else if (OB_ISNULL(params.schema_checker_)
+                 || OB_ISNULL(params.schema_checker_->get_schema_guard())) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(params.schema_checker_->get_table_schema(item.base_tid_, table))) {
+      } else if (OB_ISNULL(table)) {
+        ret = OB_SCHEMA_ERROR;
+      } else if (OB_ISNULL(column = table->get_column_schema(item.base_cid_))) {
+        ret = OB_SCHEMA_ERROR;
+      } else if (!column->is_ai_column()) {
+      } else if (OB_FAIL(params.schema_checker_->get_schema_guard()->get_database_schema(
+          table->get_database_id(), database))) {
+      } else if (OB_ISNULL(database)) {
+        ret = OB_SCHEMA_ERROR;
+      } else {
+        ObSqlString sql;
+        if (OB_FAIL(sql.assign("SELECT 1 FROM "))) {
+        } else if (OB_FAIL(ai_column_append_quoted_name(sql, database->get_database_name_str()))) {
+        } else if (OB_FAIL(sql.append("."))) {
+        } else if (OB_FAIL(ai_column_append_quoted_name(sql, table->get_table_name_str()))) {
+        } else if (OB_FAIL(sql.append(" WHERE "))) {
+        } else if (OB_FAIL(ai_column_append_quoted_name(sql, column->get_column_name_str()))) {
+        } else if (OB_FAIL(sql.append(" IS NULL LIMIT 1"))) {
+        } else if (OB_ISNULL(params.sql_proxy_) && OB_ISNULL(GCTX.sql_proxy_)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else {
+          ObMySQLProxy *proxy = OB_NOT_NULL(params.sql_proxy_) ? params.sql_proxy_ : GCTX.sql_proxy_;
+          SMART_VAR(ObMySQLProxy::MySQLResult, result) {
+            sqlclient::ObMySQLResult *row = nullptr;
+            if (OB_FAIL(proxy->read(result, sql.ptr()))) {
+            } else if (OB_ISNULL(row = result.get_result())) {
+              ret = OB_ERR_UNEXPECTED;
+            } else if (OB_SUCCESS == (ret = row->next())) {
+              ret = OB_AI_COLUMN_RESULT_NOT_READY;
+              LOG_USER_ERROR(OB_AI_COLUMN_RESULT_NOT_READY,
+                             table->get_table_id(), column->get_column_id());
+            } else if (OB_ITER_END == ret) {
+              ret = OB_SUCCESS;
+            }
+          }
+        }
+      }
+    }
+    ObSEArray<ObSelectStmt *, 4> children;
+    if (OB_SUCC(ret) && OB_FAIL(stmt.get_child_stmts(children))) {
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < children.count(); ++i) {
+      if (OB_ISNULL(children.at(i))) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(SMART_CALL(check_ai_column_strict_read(params, *children.at(i))))) {
+      }
+    }
+  }
+  return ret;
+}
+}
+
 ObResolver::ObResolver(ObResolverParams &params)
     : params_(params)
 {
@@ -640,6 +728,10 @@ int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObS
       ObRawExprWrapEnumSet enum_set_wrapper(*params_.expr_factory_, params_.session_info_);
       if (OB_FAIL(enum_set_wrapper.wrap_enum_set(*dml_stmt))) {
       }
+    }
+
+    if (OB_SUCC(ret) && stmt->is_dml_stmt() && !stmt->is_explain_stmt()
+        && OB_FAIL(check_ai_column_strict_read(params_, *static_cast<ObDMLStmt*>(stmt)))) {
     }
 
     if (OB_SUCC(ret) && stmt->is_dml_stmt() && !stmt->is_explain_stmt()) {

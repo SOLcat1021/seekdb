@@ -51,6 +51,19 @@ using namespace pl;
 namespace sql
 {
 
+namespace
+{
+bool ai_column_can_use_plan_cache(const ObSQLSessionInfo &session)
+{
+  // Strict-read validation depends on current result state and runs during
+  // resolution. Resolve every execution in this mode, including prepared SQL.
+  bool strict_read = false;
+  return session.get_local_ob_enable_plan_cache()
+      && OB_SUCCESS == session.get_sys_variable(SYS_VAR_AI_COLUMN_STRICT_READ, strict_read)
+      && !strict_read;
+}
+}
+
 const int64_t ObSql::max_error_length = 80;
 const int64_t ObSql::SQL_MEM_SIZE_LIMIT = 1024 * 1024 * 64;
 
@@ -1196,7 +1209,7 @@ int ObSql::handle_sql_execute(const ObString &sql,
   } else if ((mode == PC_PS_MODE || mode == PC_PL_MODE) && OB_ISNULL(pctx)) {
     ret = OB_INVALID_ARGUMENT;
   } else {
-    use_plan_cache = session->get_local_ob_enable_plan_cache();
+    use_plan_cache = ai_column_can_use_plan_cache(*session);
   }
 
   ObPlanCacheCtx pc_ctx(sql, mode, allocator, context, ectx);
@@ -1796,7 +1809,7 @@ int ObSql::handle_ps_execute(const ObPsStmtId client_stmt_id,
   ParamStore ps_params( (ObWrapperAllocator(allocator)) );
   ObPsCache *ps_cache = ps_cache_;
   ObPlanCache *plan_cache = plan_cache_;
-  bool use_plan_cache = session.get_local_ob_enable_plan_cache();
+  bool use_plan_cache = ai_column_can_use_plan_cache(session);
   ObPhysicalPlanCtx *pctx = ectx.get_physical_plan_ctx();
   ObSchemaGetterGuard *schema_guard = context.schema_guard_;
   int64_t origin_params_count = params.count();
@@ -1947,7 +1960,7 @@ OB_INLINE int ObSql::handle_text_query(const ObString &stmt, ObSqlCtx &context, 
   
   ObExecContext& ectx = result.get_exec_context();
   int get_plan_err = OB_SUCCESS; //used for judge whether add plan to plan cache
-  bool use_plan_cache = session.get_local_ob_enable_plan_cache();
+  bool use_plan_cache = ai_column_can_use_plan_cache(session);
   ObPlanCacheCtx *pc_ctx = NULL;
   bool is_begin_commit_stmt = false;
 
@@ -2843,7 +2856,7 @@ int ObSql::code_generate(
   }
 
   if (OB_SUCC(ret)) {
-    bool use_plan_cache = sql_ctx.session_info_->get_local_ob_enable_plan_cache();
+    bool use_plan_cache = ai_column_can_use_plan_cache(*sql_ctx.session_info_);
     ObPlanCache *plan_cache = plan_cache_;
     if (OB_UNLIKELY(NULL == plan_cache)) {
       ret = OB_ERR_UNEXPECTED;
@@ -3554,7 +3567,7 @@ OB_NOINLINE int ObSql::handle_physical_plan(const ObString &trimed_stmt,
   bool add_plan_to_pc = false;
   ObSQLSessionInfo &session = result.get_session();
   ObPlanCache *plan_cache = plan_cache_;
-  bool use_plan_cache = session.get_local_ob_enable_plan_cache();
+  bool use_plan_cache = ai_column_can_use_plan_cache(session);
   // record whether needs to do parameterization at this time,
   // if exact mode is on, not do parameterizaiton
   bool is_enable_transform_tree = !session.get_enable_exact_mode();

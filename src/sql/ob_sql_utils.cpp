@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_OPT
 #include "lib/stat/ob_diagnostic_info_guard.h"
 #include "ob_sql_utils.h"
+#include "sql/engine/dml/ai_column_write_guard.h"
 #include "sql/executor/ob_maintain_dependency_info_task.h"
 #include "share/rc/ob_server_runtime.h"
 #include "sql/ob_sql.h"
@@ -3373,7 +3374,14 @@ bool ObSQLUtils::is_iter_uncommitted_row(ObExecContext *cur_ctx)
 
 bool ObSQLUtils::is_nested_sql(ObExecContext *cur_ctx)
 {
-  return is_pl_nested_sql(cur_ctx) || is_fk_nested_sql(cur_ctx) || is_online_stat_gathering_nested_sql(cur_ctx);
+  // AI-column maintenance DML runs through an inner connection while the
+  // user statement is still active. Treat it as nested SQL so closing the
+  // inner result cannot end or roll back the outer statement transaction.
+  const bool is_ai_column_nested = cur_ctx != nullptr
+      && cur_ctx->get_parent_ctx() != nullptr
+      && sql::ai_column_internal_write;
+  return is_ai_column_nested || is_pl_nested_sql(cur_ctx)
+      || is_fk_nested_sql(cur_ctx) || is_online_stat_gathering_nested_sql(cur_ctx);
 }
 
 //bind current execute context to my session,

@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_ai_func_utils.h"
 #include "ob_ai_func_client.h"
+#include "sql/engine/dml/ai_column_write_guard.h"
 #include "query/engine/expr/ob_ai_model_resolver.h"
 #include "lib/string/ob_string_buffer.h"
 #include <cmath>
@@ -1345,6 +1346,9 @@ int ObAIFuncModel::call_completion(ObString &prompt, ObJsonObject *config, ObStr
   ObIJsonBase *result_base = nullptr;
   ObAIFuncIComplete *complete_provider = nullptr;
   ObString prompt_str;
+  if (sql::ai_column_internal_write && OB_NOT_NULL(sql::ai_column_system_prompt)) {
+    prompt_str = ObString(sql::ai_column_system_prompt);
+  }
   ObAIFuncClient client;
   ObString unencrypted_access_key;
   ObString request_model_name = get_request_model_name();
@@ -1388,6 +1392,9 @@ int ObAIFuncModel::call_completion_vector(ObArray<ObString> &prompts, ObJsonObje
   ObIJsonBase *result_base = nullptr;
   ObAIFuncIComplete *complete_provider = nullptr;
   ObString prompt_str;
+  if (sql::ai_column_internal_write && OB_NOT_NULL(sql::ai_column_system_prompt)) {
+    prompt_str = ObString(sql::ai_column_system_prompt);
+  }
   ObAIFuncClient client;
   ObString unencrypted_access_key;
   ObString request_model_name = get_request_model_name();

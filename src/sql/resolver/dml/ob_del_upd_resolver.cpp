@@ -24,6 +24,7 @@
 #include "sql/parser/parse_malloc.h"
 #include "query/vector/ob_vector_index_util.h"
 #include "sql/das/ob_domain_id.h"
+#include "sql/engine/dml/ai_column_write_guard.h"
 
 namespace oceanbase
 {
@@ -127,7 +128,9 @@ int ObDelUpdResolver::resolve_assignments(const ParseNode &parse_node,
             const ObColumnSchemaV2 *column_schema = table_schema->get_column_schema(ref_expr->get_column_id());
             if (OB_ISNULL(column_schema)) {
               ret = OB_ERR_UNEXPECTED;
-            } else if (column_schema->is_ai_column()) {
+            } else if (column_schema->is_ai_column() && !ai_column_internal_write
+                       && !session_info_->is_ai_column_internal_write()
+                       && session_info_->is_user_session()) {
               ret = OB_NOT_SUPPORTED;
               LOG_USER_ERROR(OB_NOT_SUPPORTED, "assigning AI column results directly");
             }
@@ -2194,7 +2197,9 @@ int ObDelUpdResolver::resolve_insert_columns(const ParseNode *node,
         } else if (OB_ISNULL(table_schema)
                    || OB_ISNULL(column_schema = table_schema->get_column_schema(column_expr->get_column_id()))) {
           ret = OB_ERR_UNEXPECTED;
-        } else if (column_schema->is_ai_column()) {
+        } else if (column_schema->is_ai_column() && !ai_column_internal_write
+                   && !session_info_->is_ai_column_internal_write()
+                   && session_info_->is_user_session()) {
           ret = OB_NOT_SUPPORTED;
           LOG_USER_ERROR(OB_NOT_SUPPORTED, "assigning AI column results directly");
         }
@@ -2229,7 +2234,10 @@ int ObDelUpdResolver::resolve_insert_columns(const ParseNode *node,
                    && (OB_ISNULL(table_schema)
                        || OB_ISNULL(column_schema = table_schema->get_column_schema(column_id)))) {
           ret = OB_ERR_UNEXPECTED;
-        } else if (OB_NOT_NULL(column_schema) && column_schema->is_ai_column()) {
+        } else if (OB_NOT_NULL(column_schema) && column_schema->is_ai_column()
+                   && !ai_column_internal_write
+                   && !session_info_->is_ai_column_internal_write()
+                   && session_info_->is_user_session()) {
           ret = OB_NOT_SUPPORTED;
           LOG_USER_ERROR(OB_NOT_SUPPORTED, "assigning AI column results directly");
         } else if (OB_FAIL(check_insert_column_duplicate(column_id, is_duplicate))) {

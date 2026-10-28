@@ -280,6 +280,16 @@ public:
     bool is_inited_;
   };
 
+  class AiColumnWorkerTask : public common::ObTimerTask
+  {
+  public:
+    AiColumnWorkerTask() : server_(nullptr) {}
+    int init(ObServer *server, common::ObTimer &timer);
+    void runTimerTask() override;
+  private:
+    ObServer *server_;
+  };
+
   class ObRefreshCpuFreqTimeTask: public common::ObTimerTask
   {
   public:
@@ -383,6 +393,8 @@ private:
   int refresh_cpu_frequency();
   int clean_up_invalid_tables();
   int init_ctas_clean_up_task(); //Regularly clean up the residuals related to querying and building tables and temporary tables
+  int init_ai_column_worker_task();
+  int process_ai_column_task();
   int init_redef_heart_beat_task();
   int init_ddl_heart_beat_task_container();
   int init_refresh_cpu_frequency();
@@ -483,9 +495,11 @@ private:
   common::ObTimer server_gtimer_;
   common::ObTimer sql_mem_timer_;
   common::ObTimer ctas_clean_up_timer_;
+  common::ObTimer ai_column_worker_timer_;
   ObServerDutyTask duty_task_;
   ObSqlMemoryTimerTask sql_mem_task_;
   ObCTASCleanUpTask ctas_clean_up_task_;     // repeat & no retry
+  AiColumnWorkerTask ai_column_worker_task_;
   ObRedefTableHeartBeatTask redef_table_heart_beat_task_;
   ObRefreshCpuFreqTimeTask refresh_cpu_frequency_task_;
   blocksstable::ObStorageEnv storage_env_;

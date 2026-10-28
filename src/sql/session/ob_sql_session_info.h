@@ -595,6 +595,9 @@ public:
     inner_conn_ = inner_conn;
   }
 
+  inline bool is_ai_column_internal_write() const { return ai_column_internal_write_; }
+  inline void set_ai_column_internal_write(const bool value) { ai_column_internal_write_ = value; }
+
   // show trace
 
   ObEndTransAsyncCallback &get_end_trans_cb() { return end_trans_cb_; }
@@ -970,6 +973,8 @@ private:
   bool pl_ps_protocol_; // send query result use this protocol
 
   common::sqlclient::ObISQLConnection *inner_conn_;
+  // Scoped marker carried by nested SQL execution, which may run on another worker thread.
+  bool ai_column_internal_write_;
 
   ObSessionStat session_stat_;
 

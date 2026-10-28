@@ -10975,5 +10975,18 @@
     "info_cn": "",
     "background_cn": "",
     "ref_url": ""
+  },
+  "ai_column_strict_read": {
+    "id": 10754,
+    "name": "ai_column_strict_read",
+    "default_value": "0",
+    "base_value": "0",
+    "data_type": "bool",
+    "info": "Reject reads of AI columns while any result for that column is incomplete",
+    "flags": "SESSION",
+    "publish_version": "1.0.0.0",
+    "info_cn": "AI 列未完成时拒绝读取",
+    "background_cn": "",
+    "ref_url": ""
   }
 }

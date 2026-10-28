@@ -917,7 +917,6 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
               && OB_NOT_NULL(attr_node->children_[0])
               && has_ai_column_reference(attr_node->children_[0], table_schema)) {
             ret = OB_NOT_SUPPORTED;
-            LOG_USER_ERROR(OB_NOT_SUPPORTED, "AI column dependencies");
           }
         }
       }

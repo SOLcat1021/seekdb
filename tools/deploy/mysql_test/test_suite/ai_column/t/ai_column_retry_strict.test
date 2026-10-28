@@ -47,6 +47,13 @@ while ($retry)
 eval select $ready = 1 as initial_results_ready;
 select @@ai_column_strict_read as strict_read_defaults_off;
 
+# Warm the same query before invalidation; strict reads must recheck state
+# even when a plan was previously reusable.
+set session ai_column_strict_read = on;
+select result from ai_column_retry_strict.docs where id = 2;
+select result from ai_column_retry_strict.docs where id = 2;
+set session ai_column_strict_read = off;
+
 # READY rows can be retried by an arbitrary ordinary SQL predicate.
 --exec python3 mysql_test/test_suite/ai_column/include/ai_column_mock.py stop 19124
 alter table ai_column_retry_strict.docs

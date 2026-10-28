@@ -6264,11 +6264,11 @@ ai_column_option_list ',' ai_column_option
 ;
 
 ai_column_option:
-NAME_OB '=' STRING_VALUE
+NAME_OB COMP_EQ STRING_VALUE
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_OPTION, 2, $1, $3);
 }
-| NAME_OB '=' INTNUM
+| NAME_OB COMP_EQ INTNUM
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_OPTION, 2, $1, $3);
 }
@@ -14725,6 +14725,15 @@ alter_table_action
 ;
 
 alter_table_action:
+NAME_OB AI COLUMN column_name opt_where
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_OPTION, 2, $1, $4);
+  $$->value_ = 2; /* ALTER TABLE ... RETRY AI COLUMN */
+  if ($5 != NULL) {
+    dup_string($$, result, @5.first_column, @5.last_column);
+  }
+}
+|
 opt_set table_option_list_space_seperated
 {
   (void)$1;

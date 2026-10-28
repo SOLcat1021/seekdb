@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "ob_table_modify_op.h"
+#include "sql/engine/dml/ai_column_write_guard.h"
 #include "share/ob_autoincrement_service.h"
 #include "query/session/ob_inner_sql_connection_access.h"
 #include "sql/engine/ob_physical_plan.h"
@@ -607,6 +608,27 @@ OB_DEF_SERIALIZE_SIZE(ObTableModifySpec)
 }
 
 OB_SERIALIZE_MEMBER(ObTableModifyOpInput);
+
+bool ObTableModifyOp::need_after_row_process(const ObDMLBaseCtDef &dml_ctdef)
+{
+  bool need_process = need_foreign_key_check(dml_ctdef) || has_after_row_trigger(dml_ctdef);
+  ObSQLSessionInfo *session = ctx_.get_my_session();
+  if (!need_process && dml_ctdef.is_primary_index_ && !ai_column_internal_write
+      && (OB_ISNULL(session) || !session->is_ai_column_internal_write())
+      && !is_nested_session() && OB_NOT_NULL(ctx_.get_sql_ctx())
+      && OB_NOT_NULL(ctx_.get_sql_ctx()->schema_guard_)) {
+    const ObTableSchema *table_schema = nullptr;
+    if (OB_SUCCESS == ctx_.get_sql_ctx()->schema_guard_->get_table_schema(
+                          dml_ctdef.das_base_ctdef_.index_tid_, table_schema)
+        && OB_NOT_NULL(table_schema)) {
+      for (ObTableSchema::const_column_iterator iter = table_schema->column_begin();
+           !need_process && iter != table_schema->column_end(); ++iter) {
+        need_process = OB_NOT_NULL(*iter) && (*iter)->is_ai_column();
+      }
+    }
+  }
+  return need_process;
+}
 
 ObTableModifyOp::ObTableModifyOp(ObExecContext &ctx,
                                  const ObOpSpec &spec,

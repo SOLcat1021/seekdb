@@ -139,6 +139,7 @@ ObSQLSessionInfo::ObSQLSessionInfo() :
       pl_query_sender_(NULL),
       pl_ps_protocol_(false),
       inner_conn_(NULL),
+      ai_column_internal_write_(false),
       enable_role_array_(),
       in_definer_named_proc_(false),
       priv_user_id_(OB_INVALID_ID),

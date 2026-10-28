@@ -28,6 +28,8 @@
 #endif
 #include <thread>
 #include <cstdio>
+#include <string>
+#include <vector>
 #include "observer/ob_server.h"
 #include "observer/ob_system_package_load_service.h"
 #include "rootserver/ob_ddl_service_launcher.h"
@@ -60,6 +62,8 @@ int ObServer::get_lower_bound_freeze_info(const int64_t snapshot_version, share:
 #include "sql/engine/px/p2p_datahub/ob_p2p_dh_mgr.h"
 #include "sql/ob_sql_init.h"
 #include "sql/ob_sql_task.h"
+#include "sql/engine/dml/ai_column_write_guard.h"
+#include "common/object/ob_obj_type.h"
 #include "sql/engine/cmd/ob_load_data_utils.h"
 #include "storage/tx_table/ob_tx_data_cache.h"
 #include "storage/tx/ob_ts_mgr.h"
@@ -626,9 +630,11 @@ ObServer::ObServer()
     server_gtimer_(),
     sql_mem_timer_(),
     ctas_clean_up_timer_(),
+    ai_column_worker_timer_(),
     duty_task_(),
     sql_mem_task_(),
     ctas_clean_up_task_(),
+    ai_column_worker_task_(),
     refresh_cpu_frequency_task_(),
     schema_status_proxy_(sql_proxy_),
     is_log_dir_empty_(false),
@@ -844,6 +850,8 @@ int ObServer::init(const ObServerOptions &opts, const ObPLogWriterCfg &log_cfg)
       LOG_ERROR("init server runtime failed", KR(ret));
     } else if (OB_FAIL(init_ctas_clean_up_task())) {
       LOG_ERROR("init ctas clean up task failed", KR(ret));
+    } else if (OB_FAIL(init_ai_column_worker_task())) {
+      LOG_ERROR("init AI column worker task failed", KR(ret));
     } else if (OB_FAIL(init_ddl_heart_beat_task_container())) {
       LOG_ERROR("init ddl heart beat task container failed", KR(ret));
     } else if (OB_FAIL(init_redef_heart_beat_task())) {
@@ -982,6 +990,7 @@ void ObServer::destroy()
 
     FLOG_INFO("begin to destroy ctas clean up timer");
     ctas_clean_up_timer_.destroy();
+    ai_column_worker_timer_.destroy();
     FLOG_INFO("ctas clean up timer destroyed");
 
     FLOG_INFO("begin to destroy local management service");
@@ -1611,6 +1620,7 @@ int ObServer::stop()
 
     FLOG_INFO("begin to stop ctas clean up timer");
     ctas_clean_up_timer_.stop();
+    ai_column_worker_timer_.stop();
     FLOG_INFO("ctas clean up timer stopped");
 
     FLOG_INFO("begin to stop inner sql proxy");
@@ -1942,6 +1952,7 @@ int ObServer::init_config_module()
   } else if (OB_FAIL(server_gtimer_.init("ServerGTimer", ObMemAttr("ServerGTimer")))) {
   } else if (OB_FAIL(sql_mem_timer_.init("SqlMemTimer", ObMemAttr("SqlMemTimer")))) {
   } else if (OB_FAIL(ctas_clean_up_timer_.init("CTASCleanUp", ObMemAttr("CTASCleanUp")))) {
+  } else if (OB_FAIL(ai_column_worker_timer_.init("AiColumnWorker", ObMemAttr("AiColumnWorker")))) {
   }
 
   return ret;
@@ -2689,6 +2700,288 @@ int ObServer::reload_config()
 ObServer::ObCTASCleanUpTask::ObCTASCleanUpTask()
 : obs_(nullptr), is_inited_(false)
 {}
+
+namespace
+{
+struct AiColumnPendingTask
+{
+  uint64_t column_id_;
+  int64_t retry_count_;
+  int64_t max_retries_;
+  int64_t data_type_;
+  std::string column_name_;
+  std::string expression_;
+};
+
+std::string ai_column_copy_string(const ObString &value)
+{
+  return std::string(value.ptr(), value.length());
+}
+
+int ai_column_append_identifier(ObSqlString &sql, const std::string &name)
+{
+  int ret = sql.append("`");
+  for (size_t i = 0; OB_SUCC(ret) && i < name.length(); ++i) {
+    if (name[i] == '`' && OB_FAIL(sql.append("`"))) {
+    } else if (OB_FAIL(sql.append(name.data() + i, 1))) {
+    }
+  }
+  if (OB_SUCC(ret)) {
+    ret = sql.append("`");
+  }
+  return ret;
+}
+}
+
+int ObServer::AiColumnWorkerTask::init(ObServer *server, common::ObTimer &timer)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(server) || OB_NOT_NULL(server_)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    server_ = server;
+    disable_timeout_check();
+    if (OB_FAIL(timer.schedule(*this, 100000L, true))) {
+      server_ = nullptr;
+    }
+  }
+  return ret;
+}
+
+void ObServer::AiColumnWorkerTask::runTimerTask()
+{
+  if (OB_NOT_NULL(server_) && !server_->is_stopped()) {
+    const int ret = server_->process_ai_column_task();
+    if (OB_SUCCESS != ret && OB_TABLE_NOT_EXIST != ret) {
+      LOG_WARN("AI column worker failed", KR(ret));
+    }
+  }
+}
+
+int ObServer::init_ai_column_worker_task()
+{
+  return ai_column_worker_task_.init(this, ai_column_worker_timer_);
+}
+
+int ObServer::process_ai_column_task()
+{
+  int ret = OB_SUCCESS;
+  uint64_t table_id = OB_INVALID_ID;
+  uint64_t request_id = 0;
+  bool task_found = false;
+  std::string predicate;
+  ObSqlString sql;
+  if (OB_FAIL(sql.assign("SELECT CAST(table_id AS UNSIGNED) AS table_id, "
+                         "CAST(request_id AS UNSIGNED) AS request_id, rowkey_predicate "
+                         "FROM oceanbase.__all_ai_column_task "
+                         "WHERE eligible_ts <= NOW(6) ORDER BY eligible_ts LIMIT 1"))) {
+  } else {
+    SMART_VAR(ObMySQLProxy::MySQLResult, result) {
+      sqlclient::ObMySQLResult *row = nullptr;
+      ObString key;
+      if (OB_FAIL(sql_proxy_.read(result, sql.ptr()))) {
+      } else if (OB_ISNULL(row = result.get_result())) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(row->next())) {
+        if (OB_ITER_END == ret) { ret = OB_SUCCESS; }
+      } else if (OB_FAIL(row->get_uint("table_id", table_id))) {
+      } else if (OB_FAIL(row->get_uint("request_id", request_id))) {
+      } else if (OB_FAIL(row->get_varchar("rowkey_predicate", key))) {
+      } else {
+        predicate = ai_column_copy_string(key);
+        task_found = true;
+      }
+    }
+  }
+  if (OB_FAIL(ret) || !task_found) { return ret; }
+
+  ObMySQLTransaction trans;
+  std::vector<AiColumnPendingTask> tasks;
+  std::string db_name;
+  std::string table_name;
+  if (OB_FAIL(sql.assign_fmt(
+      "SELECT CAST(task.column_id AS UNSIGNED) AS column_id, task.retry_count, "
+      "c.ai_column_max_retries, c.data_type, "
+      "c.column_name, c.ai_column_expr, d.database_name, t.table_name "
+      "FROM oceanbase.__all_ai_column_task task "
+      "JOIN oceanbase.__all_table t ON t.table_id = task.table_id "
+      "JOIN oceanbase.__all_database d ON d.database_id = t.database_id "
+      "JOIN oceanbase.__all_column c ON c.table_id = task.table_id "
+      "AND c.column_id = task.column_id "
+      "WHERE task.table_id = %lu AND task.request_id = %lu "
+      "AND task.rowkey_predicate = ", table_id, request_id))) {
+  } else if (OB_FAIL(sql_append_hex_escape_str(
+      ObString(static_cast<int32_t>(predicate.size()), predicate.data()), sql))) {
+  } else if (OB_FAIL(trans.start(&sql_proxy_))) {
+  } else {
+    SMART_VAR(ObMySQLProxy::MySQLResult, result) {
+      sqlclient::ObMySQLResult *row = nullptr;
+      if (OB_FAIL(trans.read(result, sql.ptr()))) {
+      } else if (OB_ISNULL(row = result.get_result())) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        int next_ret = OB_SUCCESS;
+        while (OB_SUCC(ret) && OB_SUCCESS == (next_ret = row->next())) {
+          AiColumnPendingTask task;
+          ObString name;
+          ObString expression;
+          ObString db;
+          ObString table;
+          if (OB_FAIL(row->get_uint("column_id", task.column_id_))) {
+          } else if (OB_FAIL(row->get_int("retry_count", task.retry_count_))) {
+          } else if (OB_FAIL(row->get_int("ai_column_max_retries", task.max_retries_))) {
+          } else if (OB_FAIL(row->get_int("data_type", task.data_type_))) {
+          } else if (OB_FAIL(row->get_varchar("column_name", name))) {
+          } else if (OB_FAIL(row->get_varchar("ai_column_expr", expression))) {
+          } else if (OB_FAIL(row->get_varchar("database_name", db))) {
+          } else if (OB_FAIL(row->get_varchar("table_name", table))) {
+          } else {
+            task.column_name_ = ai_column_copy_string(name);
+            task.expression_ = ai_column_copy_string(expression);
+            db_name = ai_column_copy_string(db);
+            table_name = ai_column_copy_string(table);
+            tasks.push_back(task);
+          }
+        }
+        if (OB_SUCC(ret) && OB_ITER_END != next_ret) { ret = next_ret; }
+      }
+    }
+  }
+
+  // DML locks the business row before invalidating task rows. Use that same
+  // order here; locking tasks first would deadlock with a dependency UPDATE.
+  if (OB_SUCC(ret) && !tasks.empty()) {
+    if (OB_FAIL(sql.assign("SELECT 1 FROM "))) {
+    } else if (OB_FAIL(ai_column_append_identifier(sql, db_name))) {
+    } else if (OB_FAIL(sql.append("."))) {
+    } else if (OB_FAIL(ai_column_append_identifier(sql, table_name))) {
+    } else if (OB_FAIL(sql.append_fmt(" WHERE %s FOR UPDATE", predicate.c_str()))) {
+    } else {
+      SMART_VAR(ObMySQLProxy::MySQLResult, result) {
+        sqlclient::ObMySQLResult *row = nullptr;
+        if (OB_FAIL(trans.read(result, sql.ptr()))) {
+        } else if (OB_ISNULL(row = result.get_result())) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(row->next())) {
+          if (OB_ITER_END == ret) { ret = OB_SUCCESS; tasks.clear(); }
+        }
+      }
+    }
+  }
+  if (OB_SUCC(ret) && !tasks.empty()) {
+    if (OB_FAIL(sql.assign_fmt("SELECT column_id FROM oceanbase.__all_ai_column_task "
+                               "WHERE table_id = %lu AND request_id = %lu "
+                               "AND rowkey_predicate = ", table_id, request_id))) {
+    } else if (OB_FAIL(sql_append_hex_escape_str(
+        ObString(static_cast<int32_t>(predicate.size()), predicate.data()), sql))) {
+    } else if (OB_FAIL(sql.append(" FOR UPDATE"))) {
+    } else {
+      SMART_VAR(ObMySQLProxy::MySQLResult, result) {
+        sqlclient::ObMySQLResult *row = nullptr;
+        if (OB_FAIL(trans.read(result, sql.ptr()))) {
+        } else if (OB_ISNULL(row = result.get_result())) {
+          ret = OB_ERR_UNEXPECTED;
+        } else {
+          int next_ret = OB_SUCCESS;
+          bool found = false;
+          while (OB_SUCCESS == (next_ret = row->next())) { found = true; }
+          if (OB_ITER_END != next_ret) { ret = next_ret; }
+          else if (!found) { tasks.clear(); }
+        }
+      }
+    }
+  }
+
+  if (OB_SUCC(ret) && tasks.empty() && trans.is_started()) {
+    // A concurrent worker may have completed the request, or its table/column
+    // may have been dropped. In either case the selected request is obsolete.
+    if (OB_FAIL(sql.assign_fmt("DELETE FROM oceanbase.__all_ai_column_task "
+                               "WHERE table_id = %lu AND request_id = %lu "
+                               "AND rowkey_predicate = ", table_id, request_id))) {
+    } else if (OB_FAIL(sql_append_hex_escape_str(
+        ObString(static_cast<int32_t>(predicate.size()), predicate.data()), sql))) {
+    } else {
+      int64_t affected_rows = 0;
+      if (OB_FAIL(trans.write(sql.ptr(), affected_rows))) {
+      }
+    }
+  }
+
+  // All result columns for the same row are written in a single transaction.
+  // The task rows stay locked until commit, so an invalidation cannot race an
+  // in-flight model response and publish an older result over a newer request.
+  for (size_t i = 0; OB_SUCC(ret) && i < tasks.size(); ++i) {
+    const AiColumnPendingTask &task = tasks[i];
+    const char *prompt = task.data_type_ == ObJsonType
+        ? "Return exactly one valid JSON value."
+        : (ob_is_integer_type(static_cast<ObObjType>(task.data_type_))
+           ? "Return exactly one base-10 integer."
+           : nullptr);
+    if (OB_FAIL(sql.assign("UPDATE "))) {
+    } else if (OB_FAIL(ai_column_append_identifier(sql, db_name))) {
+    } else if (OB_FAIL(sql.append("."))) {
+    } else if (OB_FAIL(ai_column_append_identifier(sql, table_name))) {
+    } else if (OB_FAIL(sql.append(" SET "))) {
+    } else if (OB_FAIL(ai_column_append_identifier(sql, task.column_name_))) {
+    } else if (OB_FAIL(sql.append_fmt(" = %s WHERE %s", task.expression_.c_str(), predicate.c_str()))) {
+    } else {
+      int64_t affected_rows = 0;
+      sql::AiColumnWriteGuard guard(prompt);
+      if (OB_FAIL(trans.write(sql.ptr(), affected_rows))) {
+        LOG_WARN("AI column evaluation failed", KR(ret), K(table_id), K(task.column_id_));
+      }
+    }
+  }
+  if (OB_SUCC(ret) && !tasks.empty()) {
+    if (OB_FAIL(sql.assign_fmt("DELETE FROM oceanbase.__all_ai_column_task "
+                               "WHERE table_id = %lu AND request_id = %lu "
+                               "AND rowkey_predicate = ", table_id, request_id))) {
+    } else if (OB_FAIL(sql_append_hex_escape_str(
+        ObString(static_cast<int32_t>(predicate.size()), predicate.data()), sql))) {
+    } else {
+      int64_t affected_rows = 0;
+      if (OB_FAIL(trans.write(sql.ptr(), affected_rows))) {
+      }
+    }
+  }
+  if (trans.is_started()) {
+    const int end_ret = trans.end(OB_SUCC(ret));
+    if (OB_SUCC(ret)) { ret = end_ret; }
+  }
+
+  if (OB_FAIL(ret) && !tasks.empty()) {
+    // A failed model call rolls back the entire result group. Persist retry
+    // state separately, conditional on the same request id.
+    int update_ret = OB_SUCCESS;
+    for (size_t i = 0; i < tasks.size(); ++i) {
+      const AiColumnPendingTask &task = tasks[i];
+      int64_t affected_rows = 0;
+      if (task.retry_count_ < task.max_retries_) {
+        if (OB_SUCCESS == sql.assign_fmt(
+            "UPDATE oceanbase.__all_ai_column_task "
+            "SET state = 3, retry_count = retry_count + 1, "
+            "eligible_ts = DATE_ADD(NOW(6), INTERVAL 1 SECOND) "
+            "WHERE table_id = %lu AND column_id = %lu AND request_id = %lu "
+            "AND rowkey_predicate = ", table_id, task.column_id_, request_id)
+            && OB_SUCCESS == sql_append_hex_escape_str(
+                ObString(static_cast<int32_t>(predicate.size()), predicate.data()), sql)) {
+          const int write_ret = sql_proxy_.write(sql.ptr(), affected_rows);
+          if (OB_SUCCESS == update_ret) { update_ret = write_ret; }
+        }
+      } else if (OB_SUCCESS == sql.assign_fmt(
+          "DELETE FROM oceanbase.__all_ai_column_task "
+          "WHERE table_id = %lu AND column_id = %lu AND request_id = %lu "
+          "AND rowkey_predicate = ", table_id, task.column_id_, request_id)
+          && OB_SUCCESS == sql_append_hex_escape_str(
+              ObString(static_cast<int32_t>(predicate.size()), predicate.data()), sql)) {
+        const int write_ret = sql_proxy_.write(sql.ptr(), affected_rows);
+        if (OB_SUCCESS == update_ret) { update_ret = write_ret; }
+      }
+    }
+    ret = update_ret;
+  }
+  return ret;
+}
 
 int ObServer::ObCTASCleanUpTask::init(ObServer *obs, common::ObTimer &timer)
 {
