@@ -97,10 +97,11 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
   if (OB_FAIL(tmp_allocator.eval_arg(arg0, ctx, template_datum))) {
   } else if (template_datum->is_null()) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (ob_is_text_tc(arg0->datum_meta_.type_)
-             && OB_FAIL(ObTextStringHelper::read_real_string_data(
+  } else if (ob_is_text_tc(arg0->datum_meta_.type_)) {
+    if (OB_FAIL(ObTextStringHelper::read_real_string_data(
                            ctx.exec_ctx_, tmp_allocator, *template_datum,
                            arg0->datum_meta_, arg0->obj_meta_.has_lob_header(), template_str))) {
+    }
   } else {
     template_str = template_datum->get_string();
   }
