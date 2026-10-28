@@ -60,6 +60,8 @@ public:
                                  CharType &type,
                                  ob_wc_t &unicode);
 
+  static void classify_unicode(ob_wc_t unicode, CharType &type);
+
   static int check_cn_number(ObCollationType coll_type,
                              const char *input,
                              const uint8_t char_len,
@@ -461,12 +463,18 @@ inline int ObFTCharUtil::do_classify(const char *input,
   int ret = OB_SUCCESS;
   type = CharType::USELESS;
 
-  // Every classification predicate examines the same code point.  Decoding it
-  // once is materially cheaper on the IK hot path than decoding it again for
-  // each predicate, while preserving the original classification order.
   unicode = 0;
   if (OB_FAIL(decode_unicode<CS_TYPE>(input, char_len, unicode))) {
-  } else if (ObUnicodeBlockUtils::is_alpha(unicode)) {
+  } else {
+    classify_unicode(unicode, type);
+  }
+  return ret;
+}
+
+inline void ObFTCharUtil::classify_unicode(ob_wc_t unicode, CharType &type)
+{
+  type = CharType::USELESS;
+  if (ObUnicodeBlockUtils::is_alpha(unicode)) {
     type = CharType::ENGLISH_LETTER;
   } else if (ObUnicodeBlockUtils::is_arabic(unicode)) {
     type = CharType::ARABIC_LETTER;
@@ -479,7 +487,6 @@ inline int ObFTCharUtil::do_classify(const char *input,
   } else if (ObUnicodeBlockUtils::check_low_surrogate(unicode)) {
     type = CharType::SURROGATE_LOW;
   }
-  return ret;
 }
 
 inline int ObFTCharUtil::classify_first_char(ObCollationType coll_type,

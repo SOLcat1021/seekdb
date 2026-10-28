@@ -138,15 +138,50 @@ int TokenizeContext::check_letter_connector(bool &is_connector) const
 int TokenizeContext::prepare_next_char()
 {
   int ret = OB_SUCCESS;
-  if (OB_FAIL(ObCharset::first_valid_char(coll_type_,
-                                          fulltext_ + cursor_,
-                                          fulltext_len_ - cursor_,
-                                          next_char_len_))) {
-  } else if (OB_FAIL(ObFTCharUtil::classify_first_char(coll_type_,
-                                                       fulltext_ + cursor_,
-                                                       next_char_len_,
-                                                       next_char_type_,
-                                                       next_unicode_))) {
+  const char *input = fulltext_ + cursor_;
+  const int64_t remaining = fulltext_len_ - cursor_;
+  if (CHARSET_UTF8MB4 == charset_type_ && remaining > 0) {
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(input);
+    const uint8_t lead = bytes[0];
+    if (lead < 0x80) {
+      next_char_len_ = 1;
+      next_unicode_ = lead;
+      next_char_type_ = (lead >= 'a' && lead <= 'z') || (lead >= 'A' && lead <= 'Z')
+                            ? ObFTCharUtil::CharType::ENGLISH_LETTER
+                        : (lead >= '0' && lead <= '9')
+                            ? ObFTCharUtil::CharType::ARABIC_LETTER
+                            : ObFTCharUtil::CharType::USELESS;
+      return ret;
+    }
+    if (lead >= 0xC2 && lead <= 0xDF && remaining >= 2
+        && (bytes[1] & 0xC0) == 0x80) {
+      next_char_len_ = 2;
+      next_unicode_ = ((lead & 0x1F) << 6) | (bytes[1] & 0x3F);
+    } else if (lead >= 0xE0 && lead <= 0xEF && remaining >= 3
+               && (bytes[1] & 0xC0) == 0x80 && (bytes[2] & 0xC0) == 0x80
+               && (lead != 0xE0 || bytes[1] >= 0xA0)
+               && (lead != 0xED || bytes[1] < 0xA0)) {
+      next_char_len_ = 3;
+      next_unicode_ = ((lead & 0x0F) << 12) | ((bytes[1] & 0x3F) << 6) | (bytes[2] & 0x3F);
+    } else if (lead >= 0xF0 && lead <= 0xF4 && remaining >= 4
+               && (bytes[1] & 0xC0) == 0x80 && (bytes[2] & 0xC0) == 0x80
+               && (bytes[3] & 0xC0) == 0x80
+               && (lead != 0xF0 || bytes[1] >= 0x90)
+               && (lead != 0xF4 || bytes[1] < 0x90)) {
+      next_char_len_ = 4;
+      next_unicode_ = ((lead & 0x07) << 18) | ((bytes[1] & 0x3F) << 12)
+                      | ((bytes[2] & 0x3F) << 6) | (bytes[3] & 0x3F);
+    } else {
+      next_char_len_ = 0;
+    }
+    if (0 != next_char_len_) {
+      ObFTCharUtil::classify_unicode(next_unicode_, next_char_type_);
+      return ret;
+    }
+  }
+  if (OB_FAIL(ObCharset::first_valid_char(coll_type_, input, remaining, next_char_len_))) {
+  } else if (OB_FAIL(ObFTCharUtil::classify_first_char(coll_type_, input, next_char_len_,
+                                                       next_char_type_, next_unicode_))) {
   }
   return ret;
 }
