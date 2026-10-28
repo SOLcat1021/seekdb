@@ -20,6 +20,10 @@
 #include "sql/resolver/ob_resolver_utils.h"
 #include "sql/resolver/cmd/ob_show_table_status_sql.h"
 #include "sql/printer/ob_schema_printer.h"
+#include "sql/engine/basic/ob_file_sql_csv_reader.h"
+#include "sql/engine/basic/ob_file_sql_jsonl_reader.h"
+#include "sql/engine/basic/ob_file_sql_parquet_reader.h"
+#include <string>
 
 using namespace oceanbase::common;
 using namespace oceanbase::share;
@@ -28,6 +32,143 @@ namespace oceanbase
 {
 namespace sql
 {
+
+namespace {
+int append_file_sql_literal(ObSqlString &sql, const std::string &value)
+{
+  int ret = sql.append("'");
+  for (unsigned char ch : value) {
+    if (OB_FAIL(ret)) break;
+    if (ch == 0) {
+      ret = OB_INVALID_ARGUMENT;
+    } else if (ch == '\'' || ch == '\\') {
+      char escaped[3] = {static_cast<char>(ch), static_cast<char>(ch), 0};
+      ret = sql.append(escaped);
+    } else {
+      char one[2] = {static_cast<char>(ch), 0};
+      ret = sql.append(one);
+    }
+  }
+  if (OB_SUCC(ret)) ret = sql.append("'");
+  return ret;
+}
+
+const char *file_sql_type_name(file_sql::CsvType type)
+{
+  switch (type) {
+    case file_sql::CsvType::BOOLEAN: return "BOOLEAN";
+    case file_sql::CsvType::BIGINT: return "BIGINT";
+    case file_sql::CsvType::DOUBLE: return "DOUBLE";
+    case file_sql::CsvType::DATE: return "DATE";
+    case file_sql::CsvType::DATETIME: return "DATETIME";
+    case file_sql::CsvType::NULL_TYPE: return "NULL";
+    default: return "VARCHAR";
+  }
+}
+} // namespace
+
+int ObShowResolver::resolve_file_sql_describe(const ParseNode &parse_tree, ObString &select_sql)
+{
+  int ret = OB_SUCCESS;
+  const ParseNode *query = parse_tree.num_child_ == 4 && OB_NOT_NULL(parse_tree.children_) ?
+      parse_tree.children_[1] : nullptr;
+  const ParseNode *projection = OB_NOT_NULL(query) && query->type_ == T_SELECT &&
+                                OB_NOT_NULL(query->children_) ?
+      query->children_[PARSE_SELECT_SELECT] : nullptr;
+  if (OB_ISNULL(query) || OB_ISNULL(projection) || projection->num_child_ != 1 ||
+      OB_ISNULL(projection->children_) ||
+      OB_ISNULL(projection->children_[0]) ||
+      projection->children_[0]->type_ != T_PROJECT_STRING ||
+      OB_ISNULL(projection->children_[0]->children_) ||
+      OB_ISNULL(projection->children_[0]->children_[0]) ||
+      projection->children_[0]->children_[0]->type_ != T_STAR) {
+    ret = OB_NOT_SUPPORTED;
+  } else {
+    ObSelectResolver probe(params_);
+    if (OB_FAIL(probe.resolve(*query))) {
+    } else {
+    const ObSelectStmt *stmt = probe.get_select_stmt();
+    const TableItem *table = OB_NOT_NULL(stmt) && stmt->get_table_size() == 1 ?
+        stmt->get_table_item(0) : nullptr;
+    if (OB_ISNULL(table) || table->file_sql_kind_ < 1 || table->file_sql_kind_ > 4) {
+      ret = OB_NOT_SUPPORTED;
+    } else {
+      const std::string path(table->file_sql_path_.ptr(), table->file_sql_path_.length());
+      std::string error;
+      std::vector<file_sql::CsvColumn> columns;
+      int64_t file_size = 0;
+      int64_t file_mtime = 0;
+      uint64_t file_device = 0;
+      uint64_t file_inode = 0;
+      if (table->file_sql_kind_ == 1) {
+        file_sql::CsvReader reader;
+        file_sql::CsvOptions options;
+        options.header = table->file_sql_header_;
+        options.delimiter = table->file_sql_delimiter_;
+        options.quote = table->file_sql_quote_;
+        if (!table->file_sql_null_text_.empty()) {
+          options.null_text.assign(table->file_sql_null_text_.ptr(), table->file_sql_null_text_.length());
+        }
+        if (!reader.open(path, options, error) || !reader.infer_schema(error)) {
+          ret = OB_ERR_PARSE_SQL;
+        } else {
+          columns = reader.columns();
+          file_size = reader.file_size();
+          file_mtime = reader.file_mtime();
+          file_device = reader.file_device();
+          file_inode = reader.file_inode();
+        }
+      } else if (table->file_sql_kind_ == 4) {
+        file_sql::ParquetReader reader;
+        if (!reader.open(path, error) || !reader.infer_schema(error)) {
+          ret = OB_ERR_PARSE_SQL;
+        } else {
+          columns = reader.columns();
+          file_size = reader.file_size();
+          file_mtime = reader.file_mtime();
+          file_device = reader.file_device();
+          file_inode = reader.file_inode();
+        }
+      } else {
+        file_sql::JsonlReader reader;
+        if (!reader.open(path, error) || !reader.infer_schema(error)) {
+          ret = OB_ERR_PARSE_SQL;
+        } else {
+          columns = reader.columns();
+          file_size = reader.file_size();
+          file_mtime = reader.file_mtime();
+          file_device = reader.file_device();
+          file_inode = reader.file_inode();
+        }
+      }
+      if (OB_SUCC(ret) && (file_size != table->file_sql_size_ ||
+                           file_mtime != table->file_sql_mtime_ ||
+                           file_device != table->file_sql_device_ ||
+                           file_inode != table->file_sql_inode_)) {
+        ret = OB_ERR_PARSE_SQL;
+      }
+      if (OB_SUCC(ret) && columns.size() != static_cast<size_t>(stmt->get_select_item_size())) {
+        ret = OB_NOT_SUPPORTED;
+      }
+      if (OB_SUCC(ret)) {
+        ObSqlString sql;
+        for (size_t index = 0; OB_SUCC(ret) && index < columns.size(); ++index) {
+          if (index > 0) OZ(sql.append(" UNION ALL "));
+          OZ(sql.append("SELECT "));
+          OZ(append_file_sql_literal(sql, columns[index].name));
+          OZ(sql.append(" AS column_name, "));
+          OZ(append_file_sql_literal(sql, file_sql_type_name(columns[index].type)));
+          OZ(sql.append(" AS column_type, "));
+          OZ(append_file_sql_literal(sql, columns[index].nullable ? "YES" : "NO"));
+          OZ(sql.append(" AS `null`, NULL AS `key`, NULL AS `default`, NULL AS extra"));
+        }
+        if (OB_SUCC(ret)) OZ(ob_write_string(*allocator_, sql.string(), select_sql));
+      }
+    }
+    }
+  }
+  return ret;
+}
 
 ObShowResolver::ObShowResolver(ObResolverParams &params)
     : ObSelectResolver(params)
@@ -370,6 +511,9 @@ int ObShowResolver::resolve(const ParseNode &parse_tree)
             ret = OB_ERR_UNEXPECTED;
           } else if (OB_UNLIKELY(NULL == parse_tree.children_[0])) {
             ret = OB_ERR_UNEXPECTED;
+          } else if (parse_tree.children_[0]->value_ == 4) {
+            show_resv_ctx.stmt_type_ = stmt::T_SHOW_COLUMNS;
+            ret = resolve_file_sql_describe(parse_tree, select_sql);
           } else {
             ObString show_db_name;
             uint64_t show_db_id = OB_INVALID_ID;

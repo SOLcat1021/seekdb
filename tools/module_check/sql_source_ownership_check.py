@@ -92,7 +92,7 @@ def check(repo: Path) -> List[str]:
     expected_counts = {
         "SQL_UNITY_GROUPS": 1107,
         "SQL_SIMD_UNITY_GROUPS": 3,
-        "SQL_STANDALONE_SOURCES": 5,
+        "SQL_STANDALONE_SOURCES": 8,
         "SQL_EXTRA_SOURCES": 21,
         "SQL_PARSER_SOURCES": 15,
     }
@@ -113,7 +113,10 @@ def main() -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print("sql source ownership: 1151 production + 7 separate = 1158 workspace")
+    production = len(_workspace_sql_sources(repo) - SEPARATELY_OWNED_SOURCES)
+    print(f"sql source ownership: {production} production + "
+          f"{len(SEPARATELY_OWNED_SOURCES)} separate = "
+          f"{production + len(SEPARATELY_OWNED_SOURCES)} workspace")
     return 0
 
 

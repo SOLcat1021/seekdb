@@ -150,6 +150,14 @@ struct TableItem
     snapshot_query_expr_ = nullptr;
     snapshot_query_type_ = SnapshotQueryType::NOT_USING;
     function_table_expr_ = nullptr;
+    file_sql_kind_ = 0;
+    file_sql_header_ = true;
+    file_sql_delimiter_ = ',';
+    file_sql_quote_ = '"';
+    file_sql_size_ = 0;
+    file_sql_mtime_ = 0;
+    file_sql_device_ = 0;
+    file_sql_inode_ = 0;
     ddl_schema_version_ = 0;
     ddl_table_id_ = common::OB_INVALID_ID;
     json_table_def_ = nullptr;
@@ -293,6 +301,19 @@ struct TableItem
   ObRawExpr *snapshot_query_expr_;
   SnapshotQueryType snapshot_query_type_;
   ObRawExpr *function_table_expr_;
+  // File scans reuse the native function-table planning path.
+  // 0: ordinary function table; 1: CSV; 2/3: JSONL; 4: Parquet; 5: glob.
+  int8_t file_sql_kind_;
+  common::ObString file_sql_path_;
+  common::ObString file_sql_root_;
+  bool file_sql_header_;
+  char file_sql_delimiter_;
+  char file_sql_quote_;
+  common::ObString file_sql_null_text_;
+  int64_t file_sql_size_;
+  int64_t file_sql_mtime_;
+  uint64_t file_sql_device_;
+  uint64_t file_sql_inode_;
   int64_t ddl_schema_version_;
   int64_t ddl_table_id_;
   // table partition

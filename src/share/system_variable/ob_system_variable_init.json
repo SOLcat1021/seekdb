@@ -10976,8 +10976,21 @@
     "background_cn": "",
     "ref_url": ""
   },
-  "ai_column_strict_read": {
+  "enable_file_sql": {
     "id": 10754,
+    "name": "enable_file_sql",
+    "default_value": "0",
+    "base_value": "0",
+    "data_type": "bool",
+    "info": "Allow read-only SQL scans of local files under secure_file_priv.",
+    "flags": "SESSION | GLOBAL | INFLUENCE_PLAN",
+    "publish_version": "1.0.0.0",
+    "info_cn": "允许在 secure_file_priv 目录内执行只读文件查询",
+    "background_cn": "",
+    "ref_url": ""
+  },
+  "ai_column_strict_read": {
+    "id": 10755,
     "name": "ai_column_strict_read",
     "default_value": "0",
     "base_value": "0",

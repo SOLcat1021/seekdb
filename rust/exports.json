@@ -1,4 +1,11 @@
 {
+  "file_sql_parquet": {
+    "crate": "file-sql",
+    "headers": {
+      "file_sql_parquet.h": "file_sql_parquet.h"
+    },
+    "deps": []
+  },
   "sql_nio": {
     "crate": "sql-nio",
     "headers": {},

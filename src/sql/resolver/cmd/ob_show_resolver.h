@@ -32,6 +32,7 @@ public:
   virtual int resolve(const ParseNode &parse_tree);
 protected:
 private:
+  int resolve_file_sql_describe(const ParseNode &parse_tree, common::ObString &select_sql);
   class ObSqlStrGenerator;
   struct ObShowSqlSet;
   struct ObCheckTableInfo
