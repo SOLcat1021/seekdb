@@ -30,9 +30,8 @@ namespace storage
 class ObFTWord final
 {
 public:
-  ObFTWord() : is_calc_hash_val_(false), hash_val_(0), word_(), meta_() {}
-  ObFTWord(const int64_t length, const char *ptr, const ObObjMeta &meta)
-    : is_calc_hash_val_(false), hash_val_(0), meta_(meta)
+  ObFTWord() : word_(), meta_() {}
+  ObFTWord(const int64_t length, const char *ptr, const ObObjMeta &meta) : meta_(meta)
   {
     word_.set_string(ptr, length);
   }
@@ -48,21 +47,11 @@ public:
   TO_STRING_KV(K_(meta), K_(word));
 
 private:
-  // A token is looked up and then inserted/updated in the same map while
-  // grouping a document.  Keep the collation-aware hash for that pair of map
-  // operations instead of calculating it twice.
-  mutable bool is_calc_hash_val_;
-  mutable uint64_t hash_val_;
   ObDatum word_;
   ObObjMeta meta_;
 };
 
-// ObFTWordMap belongs to one parser invocation and is never shared between
-// workers.  Avoid per-bucket locking on the tokenizer's single-threaded hot
-// path.
-typedef common::hash::ObHashMap<ObFTWord,
-                                int64_t,
-                                common::hash::NoPthreadDefendMode> ObFTWordMap;
+typedef common::hash::ObHashMap<ObFTWord, int64_t> ObFTWordMap;
 
 class ObAddWordFlag final
 {

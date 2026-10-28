@@ -119,19 +119,6 @@ public:
       K(word_map_.size()));
 
 private:
-  class UpdateWordCount final
-  {
-  public:
-    explicit UpdateWordCount(const int64_t word_cnt) : word_cnt_(word_cnt) {}
-    void operator()(common::hash::HashMapPair<ObFTWord, int64_t> &entry) const
-    {
-      entry.second += word_cnt_;
-    }
-
-  private:
-    int64_t word_cnt_;
-  };
-
   bool is_min_max_word(const int64_t c_len) const;
   int casedown_word(const ObFTWord &src, ObFTWord &dst);
   int check_stopword(const ObFTWord &word, bool &is_stopword);
