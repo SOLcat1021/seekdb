@@ -178,7 +178,26 @@ int ObTransformPreProcess::transform_one_stmt(common::ObIArray<ObParentDMLStmt> 
       }
     }
     if (OB_SUCC(ret)) {
-      if (stmt->get_match_exprs().count() > 0 &&
+      // A scalar COUNT(*) over a limited derived table only needs its row
+      // count; the implicit relevance order cannot change that count.
+      bool count_only_derived = false;
+      if (stmt->is_select_stmt() && static_cast<ObSelectStmt *>(stmt)->has_limit() &&
+          parent_stmts.count() == 1 && nullptr != parent_stmts.at(0).stmt_ &&
+          parent_stmts.at(0).stmt_->is_select_stmt()) {
+        const ObSelectStmt *outer = static_cast<const ObSelectStmt *>(parent_stmts.at(0).stmt_);
+        const TableItem *derived = outer->get_table_items().count() == 1 ? outer->get_table_item(0) : nullptr;
+        const ObRawExpr *outer_expr = outer->get_select_item_size() == 1 ? outer->get_select_item(0).expr_ : nullptr;
+        const ObSelectStmt *inner = static_cast<const ObSelectStmt *>(stmt);
+        count_only_derived = nullptr != derived && derived->is_generated_table() && derived->ref_query_ == stmt &&
+                             outer->is_scala_group_by() && outer->get_condition_exprs().empty() &&
+                             outer->get_having_exprs().empty() && !outer->has_order_by() &&
+                             outer->get_aggr_item_size() == 1 && !inner->is_fetch_with_ties() &&
+                             nullptr != outer_expr && outer_expr->get_expr_type() == T_FUN_COUNT &&
+                             outer_expr->get_param_count() == 0 && inner->get_select_item_size() == 1 &&
+                             nullptr != inner->get_select_item(0).expr_ &&
+                             inner->get_select_item(0).expr_->is_column_ref_expr();
+      }
+      if (stmt->get_match_exprs().count() > 0 && !count_only_derived &&
           OB_FAIL(preserve_order_for_fulltext_search(stmt, is_happened))) {
       } else {
         trans_happened |= is_happened;
