@@ -25,6 +25,7 @@
 #include "share/ob_rpc_struct.h"
 #include "src/pl/ob_pl.h"
 #include "sql/privilege_check/ob_ai_model_priv_util.h"
+#include "lib/time/ob_time_utility.h"
 
 using namespace oceanbase::share;
 
@@ -276,8 +277,22 @@ int ObDBMSAiService::create_ai_model(ObPLExecCtx &ctx, sql::ParamStore &params, 
       if (OB_FAIL(arg.check_valid())) {
       } else if (OB_ISNULL(root_commands)) {
         ret = OB_NOT_INIT;
-      } else if (OB_FAIL(query::serialize_root_service_call(
-                           [&]{ return root_commands->create_ai_model(arg); }))) {
+      } else {
+        // The DDL service rechecks the model under serialization. Do not pin
+        // this precheck snapshot while waiting for DDL or publishing a schema.
+        schema_guard.reset();
+        const int64_t begin_us = ObTimeUtility::current_time();
+        int64_t ddl_begin_us = 0;
+        ret = query::serialize_root_service_call([&] {
+          ddl_begin_us = ObTimeUtility::current_time();
+          return root_commands->create_ai_model(arg);
+        });
+        const int64_t end_us = ObTimeUtility::current_time();
+        if (OB_SUCCESS != ret || end_us - begin_us > 100000) {
+          LOG_WARN("AI model create DDL latency", K(ret), K(model_name),
+              "lock_wait_us", (ddl_begin_us == 0 ? end_us : ddl_begin_us) - begin_us,
+              "ddl_us", ddl_begin_us == 0 ? 0 : end_us - ddl_begin_us);
+        }
       }
     }
 
@@ -323,10 +338,22 @@ int ObDBMSAiService::drop_ai_model(ObPLExecCtx &ctx, sql::ParamStore &params, co
   } else {
     obcall::ObDropAiModelArg arg(model_name);
     arg.ddl_stmt_str_ = ctx.exec_ctx_->get_sql_ctx()->cur_sql_;
-      if (OB_ISNULL(root_commands)) {
-        ret = OB_NOT_INIT;
-      } else if (OB_FAIL(query::serialize_root_service_call(
-                           [&]{ return root_commands->drop_ai_model(arg); }))) {
+    if (OB_ISNULL(root_commands)) {
+      ret = OB_NOT_INIT;
+    } else {
+      schema_guard.reset();
+      const int64_t begin_us = ObTimeUtility::current_time();
+      int64_t ddl_begin_us = 0;
+      ret = query::serialize_root_service_call([&] {
+        ddl_begin_us = ObTimeUtility::current_time();
+        return root_commands->drop_ai_model(arg);
+      });
+      const int64_t end_us = ObTimeUtility::current_time();
+      if (OB_SUCCESS != ret || end_us - begin_us > 100000) {
+        LOG_WARN("AI model drop DDL latency", K(ret), K(model_name),
+            "lock_wait_us", (ddl_begin_us == 0 ? end_us : ddl_begin_us) - begin_us,
+            "ddl_us", ddl_begin_us == 0 ? 0 : end_us - ddl_begin_us);
+      }
     }
 
     LOG_INFO("finished to drop ai model", K(ret), K(params), K(model_name));

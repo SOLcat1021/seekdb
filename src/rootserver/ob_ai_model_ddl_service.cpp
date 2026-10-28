@@ -52,6 +52,9 @@ int ObAiModelDDLService::create_ai_model(const obcall::ObCreateAiModelArg &arg)
         ret = (OB_SUCC(ret)) ? temp_ret : ret;
       }
     }
+    // All schema-backed input has been consumed by the transaction. Release
+    // its old snapshot before loading and publishing the new schema version.
+    schema_guard.reset();
     if (OB_SUCC(ret)) {
       if (OB_FAIL(ddl_service_.publish_schema())) {
       }
@@ -91,6 +94,7 @@ int ObAiModelDDLService::drop_ai_model(const obcall::ObDropAiModelArg &arg)
       }
     }
 
+    schema_guard.reset();
     if (OB_SUCC(ret)) {
       if (OB_FAIL(ddl_service_.publish_schema())) {
       }

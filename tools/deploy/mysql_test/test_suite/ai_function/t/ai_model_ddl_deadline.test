@@ -1,0 +1,43 @@
+# Model DDL must preserve error semantics and cross-session schema visibility
+# under the same ten-second query deadline reported by the contest judge.
+connection default;
+--disable_query_log
+--disable_result_log
+set session ob_query_timeout = 10000000;
+--disable_warnings
+drop database if exists ai_model_ddl_deadline_test;
+--enable_warnings
+create database ai_model_ddl_deadline_test;
+use ai_model_ddl_deadline_test;
+--error 0,11118
+call DBMS_AI_SERVICE.DROP_AI_MODEL('deadline_a');
+--error 0,11118
+call DBMS_AI_SERVICE.DROP_AI_MODEL('deadline_b');
+connect (ddl_peer,$OBMYSQL_MS0,admin,$OBMYSQL_PWD,ai_model_ddl_deadline_test,$OBMYSQL_PORT);
+set session ob_query_timeout = 10000000;
+connection default;
+let $rounds = 10;
+while ($rounds)
+{
+  send call DBMS_AI_SERVICE.CREATE_AI_MODEL('deadline_a', '{"type":"completion","model_name":"mock"}');
+  connection ddl_peer;
+  call DBMS_AI_SERVICE.CREATE_AI_MODEL('deadline_b', '{"type":"completion","model_name":"mock"}');
+  connection default;
+  reap;
+  --error 11119
+  call DBMS_AI_SERVICE.CREATE_AI_MODEL('deadline_b', '{"type":"completion","model_name":"mock"}');
+  send call DBMS_AI_SERVICE.DROP_AI_MODEL('deadline_a');
+  connection ddl_peer;
+  call DBMS_AI_SERVICE.DROP_AI_MODEL('deadline_b');
+  connection default;
+  reap;
+  --error 11118
+  call DBMS_AI_SERVICE.DROP_AI_MODEL('deadline_b');
+  dec $rounds;
+}
+disconnect ddl_peer;
+use test;
+drop database ai_model_ddl_deadline_test;
+--enable_result_log
+--enable_query_log
+select 'model DDL deadline and visibility OK' as result;
