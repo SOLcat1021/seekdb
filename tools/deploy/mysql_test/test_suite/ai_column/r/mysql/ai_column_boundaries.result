@@ -1,0 +1,31 @@
+create database ai_column_boundaries;
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('boundary_model', '{"type":"completion","model_name":"mock-complete"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('boundary_ep', '{"ai_model_name":"boundary_model","url":"http://127.0.0.1:19125/v1/chat/completions","access_key":"boundary-key","provider":"openai"}');
+create table ai_column_boundaries.docs(
+id bigint, tenant varchar(20), `we``ird` varchar(100), 内容 varchar(100),
+result varchar(400) AI COLUMN (AI_COMPLETE('boundary_model', concat(`we``ird`, 内容))),
+score int AI COLUMN (AI_COMPLETE('boundary_model', 'constant-score')),
+primary key(id, tenant)
+);
+insert into ai_column_boundaries.docs(id, tenant, `we``ird`, 内容) values(1, 'team''a', 'old-', 'value');
+select 1 = 1 as composite_key_and_int_ready;
+composite_key_and_int_ready
+1
+start transaction;
+update ai_column_boundaries.docs set `we``ird` = 'changed-' where id = 1;
+select result is null and score = 7 as escaped_identifier_invalidates_only_dependency from ai_column_boundaries.docs;
+escaped_identifier_invalidates_only_dependency
+1
+rollback;
+start transaction;
+update ai_column_boundaries.docs set 内容 = 'changed' where id = 1;
+select result is null and score = 7 as utf8_identifier_invalidates_only_dependency from ai_column_boundaries.docs;
+utf8_identifier_invalidates_only_dependency
+1
+rollback;
+select result = 'mock:old-value' and score = 7 as rollback_restores_results from ai_column_boundaries.docs;
+rollback_restores_results
+1
+drop database ai_column_boundaries;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('boundary_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('boundary_model');

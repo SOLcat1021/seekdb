@@ -2709,7 +2709,11 @@ struct AiColumnPendingTask
   int64_t retry_count_;
   int64_t max_retries_;
   int64_t data_type_;
+  int64_t state_;
+  bool failed_ = false;
   std::string column_name_;
+  std::string state_column_name_;
+  std::string request_column_name_;
   std::string expression_;
 };
 
@@ -2728,6 +2732,26 @@ int ai_column_append_identifier(ObSqlString &sql, const std::string &name)
   }
   if (OB_SUCC(ret)) {
     ret = sql.append("`");
+  }
+  return ret;
+}
+
+int ai_column_result_update(ObSqlString &sql, const std::string &database,
+    const std::string &table, const AiColumnPendingTask &task,
+    const std::string &predicate, const uint64_t request_id, const bool failed)
+{
+  int ret = sql.assign("UPDATE ");
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(ai_column_append_identifier(sql, database))) {
+  } else if (OB_FAIL(sql.append("."))) {
+  } else if (OB_FAIL(ai_column_append_identifier(sql, table))) {
+  } else if (OB_FAIL(sql.append(" SET "))) {
+  } else if (OB_FAIL(ai_column_append_identifier(sql, task.column_name_))) {
+  } else if (OB_FAIL(sql.append_fmt(" = %s, ", failed ? "NULL" : task.expression_.c_str()))) {
+  } else if (OB_FAIL(ai_column_append_identifier(sql, task.state_column_name_))) {
+  } else if (OB_FAIL(sql.append_fmt(" = %d, ", failed ? 3 : 2))) {
+  } else if (OB_FAIL(ai_column_append_identifier(sql, task.request_column_name_))) {
+  } else if (OB_FAIL(sql.append_fmt(" = %lu WHERE %s", request_id, predicate.c_str()))) {
   }
   return ret;
 }
@@ -2800,14 +2824,19 @@ int ObServer::process_ai_column_task()
   std::string db_name;
   std::string table_name;
   if (OB_FAIL(sql.assign_fmt(
-      "SELECT CAST(task.column_id AS UNSIGNED) AS column_id, task.retry_count, "
+      "SELECT CAST(task.column_id AS UNSIGNED) AS column_id, task.retry_count, task.state, "
       "c.ai_column_max_retries, c.data_type, "
-      "c.column_name, c.ai_column_expr, d.database_name, t.table_name "
+      "c.column_name, c.ai_column_expr, d.database_name, t.table_name, "
+      "s.column_name AS state_column_name, r.column_name AS request_column_name "
       "FROM oceanbase.__all_ai_column_task task "
       "JOIN oceanbase.__all_table t ON t.table_id = task.table_id "
       "JOIN oceanbase.__all_database d ON d.database_id = t.database_id "
       "JOIN oceanbase.__all_column c ON c.table_id = task.table_id "
       "AND c.column_id = task.column_id "
+      "JOIN oceanbase.__all_column s ON s.table_id = c.table_id "
+      "AND s.column_id = c.ai_column_state_column_id "
+      "JOIN oceanbase.__all_column r ON r.table_id = c.table_id "
+      "AND r.column_id = c.ai_column_request_column_id "
       "WHERE task.table_id = %lu AND task.request_id = %lu "
       "AND task.rowkey_predicate = ", table_id, request_id))) {
   } else if (OB_FAIL(sql_append_hex_escape_str(
@@ -2827,17 +2856,24 @@ int ObServer::process_ai_column_task()
           ObString expression;
           ObString db;
           ObString table;
+          ObString state_name;
+          ObString request_name;
           if (OB_FAIL(row->get_uint("column_id", task.column_id_))) {
           } else if (OB_FAIL(row->get_int("retry_count", task.retry_count_))) {
           } else if (OB_FAIL(row->get_int("ai_column_max_retries", task.max_retries_))) {
           } else if (OB_FAIL(row->get_int("data_type", task.data_type_))) {
+          } else if (OB_FAIL(row->get_int("state", task.state_))) {
           } else if (OB_FAIL(row->get_varchar("column_name", name))) {
           } else if (OB_FAIL(row->get_varchar("ai_column_expr", expression))) {
           } else if (OB_FAIL(row->get_varchar("database_name", db))) {
           } else if (OB_FAIL(row->get_varchar("table_name", table))) {
+          } else if (OB_FAIL(row->get_varchar("state_column_name", state_name))) {
+          } else if (OB_FAIL(row->get_varchar("request_column_name", request_name))) {
           } else {
             task.column_name_ = ai_column_copy_string(name);
             task.expression_ = ai_column_copy_string(expression);
+            task.state_column_name_ = ai_column_copy_string(state_name);
+            task.request_column_name_ = ai_column_copy_string(request_name);
             db_name = ai_column_copy_string(db);
             table_name = ai_column_copy_string(table);
             tasks.push_back(task);
@@ -2883,10 +2919,24 @@ int ObServer::process_ai_column_task()
           ret = OB_ERR_UNEXPECTED;
         } else {
           int next_ret = OB_SUCCESS;
-          bool found = false;
-          while (OB_SUCCESS == (next_ret = row->next())) { found = true; }
-          if (OB_ITER_END != next_ret) { ret = next_ret; }
-          else if (!found) { tasks.clear(); }
+          std::vector<uint64_t> owned_columns;
+          while (OB_SUCC(ret) && OB_SUCCESS == (next_ret = row->next())) {
+            int64_t column_id = 0;
+            if (OB_FAIL(row->get_int("column_id", column_id))) {
+            } else {
+              owned_columns.push_back(static_cast<uint64_t>(column_id));
+            }
+          }
+          if (OB_SUCC(ret) && OB_ITER_END != next_ret) { ret = next_ret; }
+          // A dependency update can supersede just one column in an old
+          // group. Publish only columns still owned by this exact request.
+          for (size_t i = tasks.size(); OB_SUCC(ret) && i > 0; --i) {
+            bool owned = false;
+            for (const uint64_t column_id : owned_columns) {
+              owned = owned || column_id == tasks[i - 1].column_id_;
+            }
+            if (!owned) { tasks.erase(tasks.begin() + i - 1); }
+          }
         }
       }
     }
@@ -2910,28 +2960,43 @@ int ObServer::process_ai_column_task()
   // All result columns for the same row are written in a single transaction.
   // The task rows stay locked until commit, so an invalidation cannot race an
   // in-flight model response and publish an older result over a newer request.
+  bool retry_pending = false;
   for (size_t i = 0; OB_SUCC(ret) && i < tasks.size(); ++i) {
-    const AiColumnPendingTask &task = tasks[i];
+    AiColumnPendingTask &task = tasks[i];
     const char *prompt = task.data_type_ == ObJsonType
         ? "Return exactly one valid JSON value."
         : (ob_is_integer_type(static_cast<ObObjType>(task.data_type_))
            ? "Return exactly one base-10 integer."
            : nullptr);
-    if (OB_FAIL(sql.assign("UPDATE "))) {
-    } else if (OB_FAIL(ai_column_append_identifier(sql, db_name))) {
-    } else if (OB_FAIL(sql.append("."))) {
-    } else if (OB_FAIL(ai_column_append_identifier(sql, table_name))) {
-    } else if (OB_FAIL(sql.append(" SET "))) {
-    } else if (OB_FAIL(ai_column_append_identifier(sql, task.column_name_))) {
-    } else if (OB_FAIL(sql.append_fmt(" = %s WHERE %s", task.expression_.c_str(), predicate.c_str()))) {
+    int64_t affected_rows = 0;
+    if (OB_FAIL(trans.write("SAVEPOINT ai_column_evaluation", affected_rows))) {
+    } else if (OB_FAIL(ai_column_result_update(sql, db_name, table_name, task,
+                                               predicate, request_id, task.state_ == 4))) {
     } else {
-      int64_t affected_rows = 0;
       sql::AiColumnWriteGuard guard(prompt);
       if (OB_FAIL(trans.write(sql.ptr(), affected_rows))) {
-        LOG_WARN("AI column evaluation failed", KR(ret), K(table_id), K(task.column_id_));
+        const int evaluation_ret = ret;
+        LOG_WARN("AI column evaluation failed", K(evaluation_ret), K(table_id), K(task.column_id_));
+        // The proxy latches statement errors and otherwise refuses even the
+        // savepoint rollback. Acknowledge it before explicitly recovering.
+        trans.reset_last_error();
+        if (task.state_ == 4) {
+          // Failure while publishing an already-terminal column is a database
+          // error, not another inference failure.
+        } else if (OB_FAIL(trans.write("ROLLBACK TO SAVEPOINT ai_column_evaluation", affected_rows))) {
+        } else {
+          task.failed_ = true;
+          if (task.retry_count_ < task.max_retries_) {
+            retry_pending = true;
+          } else if (OB_FAIL(ai_column_result_update(sql, db_name, table_name, task,
+                                                      predicate, request_id, true))) {
+          } else if (OB_FAIL(trans.write(sql.ptr(), affected_rows))) {
+          }
+        }
       }
     }
   }
+  if (OB_SUCC(ret) && retry_pending) { ret = OB_EAGAIN; }
   if (OB_SUCC(ret) && !tasks.empty()) {
     if (OB_FAIL(sql.assign_fmt("DELETE FROM oceanbase.__all_ai_column_task "
                                "WHERE table_id = %lu AND request_id = %lu "
@@ -2949,34 +3014,36 @@ int ObServer::process_ai_column_task()
     if (OB_SUCC(ret)) { ret = end_ret; }
   }
 
-  if (OB_FAIL(ret) && !tasks.empty()) {
-    // A failed model call rolls back the entire result group. Persist retry
-    // state separately, conditional on the same request id.
+  if (OB_EAGAIN == ret && retry_pending && !tasks.empty()) {
+    // Keep the group hidden until every column reaches a terminal state.
+    // Preserve terminal failures so their exhausted models are not called again.
     int update_ret = OB_SUCCESS;
-    for (size_t i = 0; i < tasks.size(); ++i) {
+    ObMySQLTransaction retry_trans;
+    update_ret = retry_trans.start(&sql_proxy_);
+    for (size_t i = 0; OB_SUCCESS == update_ret && i < tasks.size(); ++i) {
       const AiColumnPendingTask &task = tasks[i];
       int64_t affected_rows = 0;
-      if (task.retry_count_ < task.max_retries_) {
-        if (OB_SUCCESS == sql.assign_fmt(
+      const bool exhausted = task.state_ == 4
+          || (task.failed_ && task.retry_count_ >= task.max_retries_);
+      const int state = exhausted ? 4 : (task.failed_ ? 3 : 1);
+      const int retry_increment = task.failed_ && !exhausted ? 1 : 0;
+      update_ret = sql.assign_fmt(
             "UPDATE oceanbase.__all_ai_column_task "
-            "SET state = 3, retry_count = retry_count + 1, "
+            "SET state = %d, retry_count = retry_count + %d, "
             "eligible_ts = DATE_ADD(NOW(6), INTERVAL 1 SECOND) "
             "WHERE table_id = %lu AND column_id = %lu AND request_id = %lu "
-            "AND rowkey_predicate = ", table_id, task.column_id_, request_id)
-            && OB_SUCCESS == sql_append_hex_escape_str(
-                ObString(static_cast<int32_t>(predicate.size()), predicate.data()), sql)) {
-          const int write_ret = sql_proxy_.write(sql.ptr(), affected_rows);
-          if (OB_SUCCESS == update_ret) { update_ret = write_ret; }
-        }
-      } else if (OB_SUCCESS == sql.assign_fmt(
-          "DELETE FROM oceanbase.__all_ai_column_task "
-          "WHERE table_id = %lu AND column_id = %lu AND request_id = %lu "
-          "AND rowkey_predicate = ", table_id, task.column_id_, request_id)
-          && OB_SUCCESS == sql_append_hex_escape_str(
-              ObString(static_cast<int32_t>(predicate.size()), predicate.data()), sql)) {
-        const int write_ret = sql_proxy_.write(sql.ptr(), affected_rows);
-        if (OB_SUCCESS == update_ret) { update_ret = write_ret; }
+            "AND rowkey_predicate = ", state, retry_increment, table_id, task.column_id_, request_id);
+      if (OB_SUCCESS == update_ret) {
+        update_ret = sql_append_hex_escape_str(
+            ObString(static_cast<int32_t>(predicate.size()), predicate.data()), sql);
       }
+      if (OB_SUCCESS == update_ret) {
+        update_ret = retry_trans.write(sql.ptr(), affected_rows);
+      }
+    }
+    if (retry_trans.is_started()) {
+      const int end_ret = retry_trans.end(OB_SUCCESS == update_ret);
+      if (OB_SUCCESS == update_ret) { update_ret = end_ret; }
     }
     ret = update_ret;
   }

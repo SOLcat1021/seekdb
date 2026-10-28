@@ -69,7 +69,7 @@ int append_ai_retry_identifier(ObSqlString &sql, const ObString &name)
   return ret;
 }
 
-std::string retry_where_predicate(const ObString &where, const ObString &ai_name)
+std::string retry_where_predicate(const ObString &where, const ObString &state_name)
 {
   std::string raw(where.ptr() == nullptr ? "" : where.ptr(), where.length());
   const size_t where_pos = raw.find_first_not_of(" \t\r\n");
@@ -102,12 +102,12 @@ std::string retry_where_predicate(const ObString &where, const ObString &ai_name
       }
       const ObString token(static_cast<int32_t>(i - begin), predicate.data() + begin);
       if (token.case_compare("status") == 0) {
-        rewritten += "(CASE WHEN `";
-        for (int64_t j = 0; j < ai_name.length(); ++j) {
-          if (ai_name.ptr()[j] == '`') { rewritten.push_back('`'); }
-          rewritten.push_back(ai_name.ptr()[j]);
+        rewritten += "(CASE COALESCE(`";
+        for (int64_t j = 0; j < state_name.length(); ++j) {
+          if (state_name.ptr()[j] == '`') { rewritten.push_back('`'); }
+          rewritten.push_back(state_name.ptr()[j]);
         }
-        rewritten += "` IS NULL THEN 'FAILED' ELSE 'READY' END)";
+        rewritten += "`, 1) WHEN 1 THEN 'PENDING' WHEN 2 THEN 'READY' ELSE 'FAILED' END)";
       } else {
         rewritten.append(predicate, begin, i - begin);
       }
@@ -136,6 +136,10 @@ int execute_ai_column_retry(ObExecContext &ctx, ObAlterTableStmt &stmt)
   if (OB_ISNULL(ai_column) || !ai_column->is_ai_column()) {
     return OB_NOT_SUPPORTED;
   }
+  const ObColumnSchemaV2 *state_column = schema->get_column_schema(ai_column->get_ai_column_state_column_id());
+  const ObColumnSchemaV2 *request_column = schema->get_column_schema(ai_column->get_ai_column_request_column_id());
+  if (OB_ISNULL(state_column) || OB_ISNULL(request_column)) { return OB_SCHEMA_ERROR; }
+  AiColumnWriteGuard retry_guard;
   ObMySQLTransaction trans;
   ObSqlString sql;
   if (OB_FAIL(trans.start(proxy))) { return ret; }
@@ -157,7 +161,7 @@ int execute_ai_column_retry(ObExecContext &ctx, ObAlterTableStmt &stmt)
   } else if (OB_SUCC(ret) && OB_FAIL(append_ai_retry_identifier(sql, stmt.get_table_name()))) {
   }
   const std::string where = retry_where_predicate(stmt.get_retry_ai_where_sql(),
-                                                   ai_column->get_column_name_str());
+                                                   state_column->get_column_name_str());
   if (OB_SUCC(ret) && !where.empty() && OB_FAIL(sql.append_fmt(" WHERE %s", where.c_str()))) {
   } else if (OB_SUCC(ret) && OB_FAIL(sql.append(" FOR UPDATE"))) {
   }
@@ -208,7 +212,11 @@ int execute_ai_column_retry(ObExecContext &ctx, ObAlterTableStmt &stmt)
     } else if (OB_FAIL(append_ai_retry_identifier(sql, stmt.get_table_name()))) {
     } else if (OB_FAIL(sql.append(" SET "))) {
     } else if (OB_FAIL(append_ai_retry_identifier(sql, ai_column->get_column_name_str()))) {
-    } else if (OB_FAIL(sql.append_fmt(" = NULL WHERE %s", key.c_str()))) {
+    } else if (OB_FAIL(sql.append(" = NULL, "))) {
+    } else if (OB_FAIL(append_ai_retry_identifier(sql, state_column->get_column_name_str()))) {
+    } else if (OB_FAIL(sql.append(" = 1, "))) {
+    } else if (OB_FAIL(append_ai_retry_identifier(sql, request_column->get_column_name_str()))) {
+    } else if (OB_FAIL(sql.append_fmt(" = %lu WHERE %s", request_id, key.c_str()))) {
     } else {
       AiColumnWriteGuard internal_write;
       if (OB_FAIL(trans.write(sql.ptr(), affected_rows))) {

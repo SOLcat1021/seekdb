@@ -52,6 +52,8 @@ select @@ai_column_strict_read as strict_read_defaults_off;
 set session ai_column_strict_read = on;
 select result from ai_column_retry_strict.docs where id = 2;
 select result from ai_column_retry_strict.docs where id = 2;
+prepare strict_cached from 'select result from ai_column_retry_strict.docs where id = 2';
+execute strict_cached;
 set session ai_column_strict_read = off;
 
 # READY rows can be retried by an arbitrary ordinary SQL predicate.
@@ -74,6 +76,10 @@ from ai_column_retry_strict.docs where label is not null;
 --replace_regex /table_id=[0-9]+, column_id=[0-9]+/table_id=<table_id>, column_id=<column_id>/
 --error 11120
 select result from ai_column_retry_strict.docs where id = 2;
+--replace_regex /table_id=[0-9]+, column_id=[0-9]+/table_id=<table_id>, column_id=<column_id>/
+--error 11120
+execute strict_cached;
+deallocate prepare strict_cached;
 --replace_regex /table_id=[0-9]+, column_id=[0-9]+/table_id=<table_id>, column_id=<column_id>/
 --error 11120
 select id, result from ai_column_retry_strict.docs order by id;

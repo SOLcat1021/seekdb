@@ -1,0 +1,36 @@
+# Quoted/UTF-8 dependencies, composite string keys, and INT result prompting.
+connection default;
+--exec python3 mysql_test/test_suite/ai_column/include/ai_column_mock.py start 19125
+create database ai_column_boundaries;
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('boundary_model', '{"type":"completion","model_name":"mock-complete"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('boundary_ep', '{"ai_model_name":"boundary_model","url":"http://127.0.0.1:19125/v1/chat/completions","access_key":"boundary-key","provider":"openai"}');
+create table ai_column_boundaries.docs(
+  id bigint, tenant varchar(20), `we``ird` varchar(100), 内容 varchar(100),
+  result varchar(400) AI COLUMN (AI_COMPLETE('boundary_model', concat(`we``ird`, 内容))),
+  score int AI COLUMN (AI_COMPLETE('boundary_model', 'constant-score')),
+  primary key(id, tenant)
+);
+insert into ai_column_boundaries.docs(id, tenant, `we``ird`, 内容) values(1, 'team''a', 'old-', 'value');
+let $retry = 150;
+let $ready = 0;
+while ($retry)
+{
+  let $ready = `select count(*) = 1 from ai_column_boundaries.docs where result = 'mock:old-value' and score = 7`;
+  if ($ready == 1) { let $retry = 0; }
+  if ($ready == 0) { --real_sleep 0.1
+    dec $retry; }
+}
+eval select $ready = 1 as composite_key_and_int_ready;
+start transaction;
+update ai_column_boundaries.docs set `we``ird` = 'changed-' where id = 1;
+select result is null and score = 7 as escaped_identifier_invalidates_only_dependency from ai_column_boundaries.docs;
+rollback;
+start transaction;
+update ai_column_boundaries.docs set 内容 = 'changed' where id = 1;
+select result is null and score = 7 as utf8_identifier_invalidates_only_dependency from ai_column_boundaries.docs;
+rollback;
+select result = 'mock:old-value' and score = 7 as rollback_restores_results from ai_column_boundaries.docs;
+drop database ai_column_boundaries;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('boundary_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('boundary_model');
+--exec python3 mysql_test/test_suite/ai_column/include/ai_column_mock.py stop 19125

@@ -96,6 +96,7 @@
 #include "sql/pl/ob_pl_package.h"
 #include "sql/engine/dml/ai_column_write_guard.h"
 #include "common/mysqlclient/ob_mysql_proxy.h"
+#include "query/session/ob_session_inner_sql.h"
 
 namespace oceanbase
 {
@@ -148,20 +149,28 @@ int check_ai_column_strict_read(ObResolverParams &params, const ObDMLStmt &stmt)
         ret = OB_SCHEMA_ERROR;
       } else {
         ObSqlString sql;
-        if (OB_FAIL(sql.assign("SELECT 1 FROM "))) {
+        const ObColumnSchemaV2 *state_column = table->get_column_schema(
+            column->get_ai_column_state_column_id());
+        if (OB_ISNULL(state_column)) {
+          ret = OB_SCHEMA_ERROR;
+        } else if (OB_FAIL(sql.assign("SELECT 1 FROM "))) {
         } else if (OB_FAIL(ai_column_append_quoted_name(sql, database->get_database_name_str()))) {
         } else if (OB_FAIL(sql.append("."))) {
         } else if (OB_FAIL(ai_column_append_quoted_name(sql, table->get_table_name_str()))) {
-        } else if (OB_FAIL(sql.append(" WHERE "))) {
-        } else if (OB_FAIL(ai_column_append_quoted_name(sql, column->get_column_name_str()))) {
-        } else if (OB_FAIL(sql.append(" IS NULL LIMIT 1"))) {
+        } else if (OB_FAIL(sql.append(" WHERE COALESCE("))) {
+        } else if (OB_FAIL(ai_column_append_quoted_name(sql, state_column->get_column_name_str()))) {
+        } else if (OB_FAIL(sql.append(", 1) <> 2 LIMIT 1"))) {
         } else if (OB_ISNULL(params.sql_proxy_) && OB_ISNULL(GCTX.sql_proxy_)) {
           ret = OB_ERR_UNEXPECTED;
         } else {
           ObMySQLProxy *proxy = OB_NOT_NULL(params.sql_proxy_) ? params.sql_proxy_ : GCTX.sql_proxy_;
+          query::ObSessionInnerSql session_sql(params.session_info_);
+          AiColumnWriteGuard internal_read(nullptr, params.session_info_);
           SMART_VAR(ObMySQLProxy::MySQLResult, result) {
             sqlclient::ObMySQLResult *row = nullptr;
-            if (OB_FAIL(proxy->read(result, sql.ptr()))) {
+            const int read_ret = params.session_info_->is_in_transaction()
+                ? session_sql.execute_read(sql, result) : proxy->read(result, sql.ptr());
+            if (OB_FAIL(read_ret)) {
             } else if (OB_ISNULL(row = result.get_result())) {
               ret = OB_ERR_UNEXPECTED;
             } else if (OB_SUCCESS == (ret = row->next())) {

@@ -1,0 +1,64 @@
+create database ai_column_states;
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('state_ok', '{"type":"completion","model_name":"mock-complete"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('state_ok_ep', '{"ai_model_name":"state_ok","url":"http://127.0.0.1:19126/v1/chat/completions","access_key":"state-key","provider":"openai"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('state_fail', '{"type":"completion","model_name":"mock-fail"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('state_fail_ep', '{"ai_model_name":"state_fail","url":"http://127.0.0.1:19126/always-fail/v1/chat/completions","access_key":"state-key","provider":"openai"}');
+create table ai_column_states.docs(
+id bigint primary key, content varchar(100),
+good varchar(300) AI COLUMN (AI_COMPLETE('state_ok', content)) WITH (max_retries=0),
+bad varchar(300) AI COLUMN (AI_COMPLETE('state_fail', content)) WITH (max_retries=0)
+);
+insert into ai_column_states.docs(id, content) values(1, 'value');
+select 1 = 1 as mixed_group_published;
+mixed_group_published
+1
+select good = 'mock:value' and bad is null as mixed_terminal_results from ai_column_states.docs;
+mixed_terminal_results
+1
+set session ai_column_strict_read = on;
+select good from ai_column_states.docs;
+good
+mock:value
+select bad from ai_column_states.docs;
+ERROR HY000: AI column has unfinished tasks for table_id=<table_id>, column_id=<column_id>
+set session ai_column_strict_read = off;
+create table ai_column_states.pending_docs(
+id bigint primary key, content varchar(100),
+result varchar(300) AI COLUMN (AI_COMPLETE('state_fail', content)) WITH (max_retries=100)
+);
+insert into ai_column_states.pending_docs(id, content) values(1, 'pending');
+set @pending_request = (select max(request_id) from oceanbase.__all_ai_column_task);
+alter table ai_column_states.pending_docs retry ai column result where status = 'FAILED';
+select max(request_id) = @pending_request as pending_is_not_failed from oceanbase.__all_ai_column_task;
+pending_is_not_failed
+1
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('state_embed', '{"type":"dense_embedding","model_name":"mock-embed"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('state_embed_ep', '{"ai_model_name":"state_embed","url":"http://127.0.0.1:19126/v1/embeddings","access_key":"state-key","provider":"openai"}');
+create table ai_column_states.null_docs(
+id bigint primary key, content varchar(100),
+result vector(4) AI COLUMN (AI_EMBED('state_embed', content)) WITH (max_retries=0)
+);
+insert into ai_column_states.null_docs(id, content) values(1, null);
+select 1 = 1 as null_result_task_completed;
+null_result_task_completed
+1
+set session ai_column_strict_read = on;
+select result is null as ready_null_is_readable from ai_column_states.null_docs;
+ready_null_is_readable
+1
+start transaction;
+insert into ai_column_states.null_docs(id, content) values(2, 'not-committed');
+select result from ai_column_states.null_docs;
+ERROR HY000: AI column has unfinished tasks for table_id=<table_id>, column_id=<column_id>
+rollback;
+select count(*) = 1 as strict_check_preserves_transaction from ai_column_states.null_docs;
+strict_check_preserves_transaction
+1
+set session ai_column_strict_read = off;
+drop database ai_column_states;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('state_ok_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('state_fail_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('state_ok');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('state_fail');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('state_embed_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('state_embed');

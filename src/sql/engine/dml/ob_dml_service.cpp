@@ -82,15 +82,27 @@ bool ai_expr_references_column(const ObString &expr, const ObString &name)
         }
       }
     } else if (text[i] == '`') {
-      const int64_t begin = ++i;
-      while (i < length && text[i] != '`') { ++i; }
-      if (ObString(static_cast<int32_t>(i - begin), text + begin).case_compare(name) == 0) {
+      std::string identifier;
+      ++i;
+      while (i < length) {
+        if (text[i] != '`') {
+          identifier.push_back(text[i++]);
+        } else if (i + 1 < length && text[i + 1] == '`') {
+          identifier.push_back('`');
+          i += 2;
+        } else {
+          ++i;
+          break;
+        }
+      }
+      if (ObString(static_cast<int32_t>(identifier.size()), identifier.data()).case_compare(name) == 0) {
         return true;
       }
-      if (i < length) { ++i; }
-    } else if (std::isalpha(static_cast<unsigned char>(text[i])) || text[i] == '_') {
+    } else if (std::isalpha(static_cast<unsigned char>(text[i])) || text[i] == '_'
+               || static_cast<unsigned char>(text[i]) >= 0x80) {
       const int64_t begin = i++;
-      while (i < length && (std::isalnum(static_cast<unsigned char>(text[i])) || text[i] == '_')) {
+      while (i < length && (std::isalnum(static_cast<unsigned char>(text[i])) || text[i] == '_'
+                            || text[i] == '$' || static_cast<unsigned char>(text[i]) >= 0x80)) {
         ++i;
       }
       if (ObString(static_cast<int32_t>(i - begin), text + begin).case_compare(name) == 0) {
@@ -2458,18 +2470,28 @@ int ObDMLService::handle_ai_column_row(ObDMLModifyRowNode &modify_row)
         const ObString &db = database_schema->get_database_name_str();
         const ObString &table = table_schema->get_table_name_str();
         const ObString &column = ai_column->get_column_name_str();
+        const ObColumnSchemaV2 *state_column = table_schema->get_column_schema(
+            ai_column->get_ai_column_state_column_id());
+        const ObColumnSchemaV2 *request_column = table_schema->get_column_schema(
+            ai_column->get_ai_column_request_column_id());
         // A newly inserted row already has a NULL AI result.  Updating the
         // same row through the nested transaction would conflict with the
         // outer INSERT's row lock, so only invalidate an existing result on
         // UPDATE; both INSERT and UPDATE still enqueue a fresh task below.
-        if (!is_update) {
+        if (OB_ISNULL(state_column) || OB_ISNULL(request_column)) {
+          ret = OB_SCHEMA_ERROR;
+        } else if (!is_update) {
         } else if (OB_FAIL(sql.assign("UPDATE "))) {
         } else if (OB_FAIL(ai_append_identifier(sql, db))) {
         } else if (OB_FAIL(sql.append("."))) {
         } else if (OB_FAIL(ai_append_identifier(sql, table))) {
         } else if (OB_FAIL(sql.append(" SET "))) {
         } else if (OB_FAIL(ai_append_identifier(sql, column))) {
-        } else if (OB_FAIL(sql.append_fmt(" = NULL WHERE %s", new_predicate.ptr()))) {
+        } else if (OB_FAIL(sql.append(" = NULL, "))) {
+        } else if (OB_FAIL(ai_append_identifier(sql, state_column->get_column_name_str()))) {
+        } else if (OB_FAIL(sql.append(" = 1, "))) {
+        } else if (OB_FAIL(ai_append_identifier(sql, request_column->get_column_name_str()))) {
+        } else if (OB_FAIL(sql.append_fmt(" = %lu WHERE %s", request_id, new_predicate.ptr()))) {
         } else {
           ai_stage = "invalidate result";
           AiColumnWriteGuard guard(nullptr, op.get_exec_ctx().get_my_session());

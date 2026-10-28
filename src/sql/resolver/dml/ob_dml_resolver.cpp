@@ -44,6 +44,7 @@
 #include "sql/engine/basic/ob_file_sql_csv_reader.h"
 #include "sql/engine/basic/ob_file_sql_jsonl_reader.h"
 #include "sql/engine/basic/ob_file_sql_parquet_reader.h"
+#include "sql/engine/dml/ai_column_write_guard.h"
 #include <cstdlib>
 #include <filesystem>
 #include <algorithm>
@@ -1853,6 +1854,7 @@ int ObDMLResolver::resolve_basic_column_item(const TableItem &table_item,
                                              ObDMLStmt *stmt /* = NULL */)
 {
   int ret = OB_SUCCESS;
+  include_hidden = include_hidden || ai_column_internal_write;
   ObColumnRefRawExpr *col_expr = NULL;
   ObSchemaGetterGuard *schema_guard = NULL;
   ColumnItem column_item;
