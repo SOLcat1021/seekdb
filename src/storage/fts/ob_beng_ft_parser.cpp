@@ -18,6 +18,10 @@
 
 #include "storage/fts/ob_beng_ft_parser.h"
 #include "data_plane/fts/ob_fts_struct.h"
+#include "storage/fts/ob_fts_stop_word.h"
+
+#include <algorithm>
+#include <array>
 
 using namespace oceanbase::common;
 
@@ -25,6 +29,43 @@ namespace oceanbase
 {
 namespace storage
 {
+namespace
+{
+bool is_builtin_ascii_stopword(const char *word, const uint32_t length)
+{
+  static constexpr size_t COUNT = sizeof(ob_stop_word_list) / sizeof(ob_stop_word_list[0]);
+  bool matched = false;
+  if (length > 0 && length <= sizeof(uint64_t)) {
+    uint64_t key = 0;
+    bool alphabetic = true;
+    for (uint32_t i = 0; alphabetic && i < length; ++i) {
+      unsigned char c = static_cast<unsigned char>(word[i]);
+      if (c >= 'A' && c <= 'Z') {
+        c += 'a' - 'A';
+      }
+      alphabetic = c >= 'a' && c <= 'z';
+      key |= static_cast<uint64_t>(c) << (i * 8);
+    }
+    if (alphabetic) {
+      static const std::array<uint64_t, COUNT> keys = [] {
+        std::array<uint64_t, COUNT> result{};
+        for (size_t i = 0; i < COUNT; ++i) {
+          const size_t word_len = STRLEN(ob_stop_word_list[i]);
+          if (word_len <= sizeof(uint64_t)) {
+            for (size_t j = 0; j < word_len; ++j) {
+              result[i] |= static_cast<uint64_t>(ob_stop_word_list[i][j]) << (j * 8);
+            }
+          }
+        }
+        std::sort(result.begin(), result.end());
+        return result;
+      }();
+      matched = std::binary_search(keys.begin(), keys.end(), key);
+    }
+  }
+  return matched;
+}
+} // namespace
 
 int ObBEngFTParser::get_next_token(
     const char *&word,
@@ -53,38 +94,42 @@ int ObBEngFTParser::get_next_token(
       } else if (OB_ISNULL(token.ptr_) || OB_UNLIKELY(0 == token.len_ || token_freq <= 0)) {
         ret = OB_INVALID_ARGUMENT;
       } else {
-        begin = 0;
-        end = token.len_;
-        while (begin < end && !ob_isalnum(cs_, token.ptr_[begin])) {
-          ++begin;
+        if (ascii_doc_) {
+          // The whitespace tokenizer already treats ASCII punctuation and
+          // controls as delimiters.  A pure ASCII token therefore needs no
+          // second classification pass or edge trimming.
+          begin = 0;
+          end = token.len_;
+          found_alnum = true;
+        } else {
+          begin = 0;
+          end = token.len_;
+          while (begin < end && !ob_isalnum(cs_, token.ptr_[begin])) {
+            ++begin;
+          }
+          found_alnum = begin < end;
+          while (end > begin && !ob_isalnum(cs_, token.ptr_[end - 1])) {
+            --end;
+          }
         }
-        found_alnum = begin < end;
-        while (end > begin && !ob_isalnum(cs_, token.ptr_[end - 1])) {
-          --end;
+        // Stop words never reach the document word map.  Discard the common
+        // ASCII case before allocating and lowercasing an owning token copy.
+        if (found_alnum
+            && (cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI || cs_->number == CS_TYPE_UTF8MB4_BIN)
+            && is_builtin_ascii_stopword(token.ptr_ + begin, end - begin)) {
+          found_alnum = false;
         }
       }
     }
     if (OB_SUCC(ret)) {
       ObString normalized;
-      // Allocate the normalized token directly in the caller's owning arena.
-      // The word map retains these bytes after the next token is requested.
       const char *source = token.ptr_ + begin;
       const uint32_t length = end - begin;
-      bool ascii = cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI || cs_->number == CS_TYPE_UTF8MB4_BIN;
-      for (uint32_t i = 0; ascii && i < length; ++i) {
-        ascii = static_cast<unsigned char>(source[i]) < 0x80;
-      }
-      if (ascii) {
-        char *buffer = static_cast<char *>(allocator_.alloc(length));
-        if (OB_ISNULL(buffer)) {
-          ret = OB_ALLOCATE_MEMORY_FAILED;
-        } else {
-          for (uint32_t i = 0; i < length; ++i) {
-            const char c = source[i];
-            buffer[i] = c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
-          }
-          normalized.assign_ptr(buffer, length);
-        }
+      if (ascii_doc_) {
+        // The whole ASCII document was normalized once in init().  Returning a
+        // view avoids one arena allocation for every token while the document
+        // buffer remains alive for the word map.
+        normalized.assign_ptr(source, length);
       } else if (OB_FAIL(ObCharset::tolower(cs_, ObString(length, source), normalized, allocator_))) {
       }
       if (OB_SUCC(ret)) {
@@ -108,9 +153,26 @@ int ObBEngFTParser::init(ObFTParserParam *param)
   } else if (OB_UNLIKELY(UINT32_MAX < param->ft_length_)) {
     ret = OB_NOT_SUPPORTED;
   } else {
-    doc_.set_string(param->fulltext_, param->ft_length_);
     cs_ = param->cs_;
-    if (OB_FAIL(tokenizer_.open(doc_, cs_))) {
+    ascii_doc_ = cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI || cs_->number == CS_TYPE_UTF8MB4_BIN;
+    for (int64_t i = 0; ascii_doc_ && i < param->ft_length_; ++i) {
+      ascii_doc_ = static_cast<unsigned char>(param->fulltext_[i]) < 0x80;
+    }
+    if (ascii_doc_) {
+      char *buffer = static_cast<char *>(allocator_.alloc(param->ft_length_));
+      if (OB_ISNULL(buffer)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else {
+        for (int64_t i = 0; i < param->ft_length_; ++i) {
+          const char c = param->fulltext_[i];
+          buffer[i] = c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
+        }
+        doc_.set_string(buffer, param->ft_length_);
+      }
+    } else {
+      doc_.set_string(param->fulltext_, param->ft_length_);
+    }
+    if (OB_SUCC(ret) && OB_FAIL(tokenizer_.open(doc_, cs_))) {
     } else {
       is_inited_ = true;
     }
@@ -125,6 +187,7 @@ void ObBEngFTParser::reset()
 {
   tokenizer_.reset();
   cs_ = nullptr;
+  ascii_doc_ = false;
   doc_.reset();
   is_inited_ = false;
 }

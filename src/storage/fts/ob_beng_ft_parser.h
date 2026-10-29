@@ -38,6 +38,7 @@ public:
       cs_(nullptr),
       tokenizer_(),
       doc_(),
+      ascii_doc_(false),
       is_inited_(false)
   {}
   ~ObBEngFTParser() { reset(); }
@@ -56,6 +57,7 @@ private:
   const ObCharsetInfo *cs_;
   share::ObTextWhitespaceTokenizer tokenizer_;
   common::ObDatum doc_;
+  bool ascii_doc_;
   bool is_inited_;
 
   DISALLOW_COPY_AND_ASSIGN(ObBEngFTParser);
