@@ -88,6 +88,9 @@ static void sk_cuvs_release_search_state(sk_cuvs_index *h)
 
 void* seekdb_cuvs_build(const float* base, long n, long dim)
 {
+  size_t dataset_bytes = 0;
+  if (!base || n <= 1 || dim <= 0 || n > (long)UINT32_MAX ||
+      !sk_cuvs_2d_bytes(n, dim, sizeof(float), &dataset_bytes)) return NULL;
   sk_cuvs_index* h = (sk_cuvs_index*)calloc(1, sizeof(*h));
   if (!h) return NULL;
   if (cuvsResourcesCreate(&h->res) != CUVS_SUCCESS) { free(h); return NULL; }
@@ -127,7 +130,7 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
 {
   sk_cuvs_index* h = (sk_cuvs_index*)handle;
   if (!h || !query || !out_ids || nq <= 0 || topk <= 0 || h->dim <= 0 ||
-      !h->search_mu_ready) return 1;
+      topk > h->n || !h->search_mu_ready) return 1;
   if (pthread_mutex_lock(&h->search_mu) != 0) return 2;
   int rc = 0;
   size_t query_bytes = 0, result_bytes = 0, distance_bytes = 0;
@@ -161,15 +164,15 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       const int quality_search = (h->dim >= 256 || h->n >= 100000);
       const size_t multiplier = quality_search ? 4 : 2;
       const size_t min_itopk = quality_search ? 512 : 256;
+      if ((uint64_t)topk > (uint64_t)SIZE_MAX / multiplier) { rc = 4; goto done; }
       size_t required_itopk = (size_t)topk * multiplier;
       if (required_itopk < min_itopk) required_itopk = min_itopk;
       h->search_params->itopk_size = h->search_default_itopk > required_itopk
           ? h->search_default_itopk : required_itopk;
       h->search_params->search_width = quality_search ? 4 : 1;
-      /* hipVS documents MULTI_CTA for small batches and SINGLE_CTA for large
-       * batches.  Selecting it here avoids paying the large-batch kernel's
-       * setup cost for the overwhelmingly common single-query path. */
-      h->search_params->algo = (nq <= 8) ? MULTI_CTA : SINGLE_CTA;
+      /* Let hipVS choose MULTI_CTA/SINGLE_CTA from the actual device shape;
+       * its AUTO policy accounts for SM count and max_queries. */
+      h->search_params->algo = AUTO;
     }
     cuvsFilter f; f.type=NO_FILTER; f.addr=(uintptr_t)0;
     if (cuvsCagraSearch(h->res, h->search_params, h->idx, &qt, &nt, &dt, f) != CUVS_SUCCESS) { rc=15; goto done; }
