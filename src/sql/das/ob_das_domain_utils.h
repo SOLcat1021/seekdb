@@ -362,6 +362,7 @@ public:
     ft_doc_word_iter_(nullptr),
     ft_doc_word_allocator_(allocator),
     ft_parse_helper_(),
+    word_map_(),
     is_inited_(false)
   {
     ObDomainDMLIterator::mode_ = mode;
@@ -395,6 +396,9 @@ private:
   data_plane::ObFTDocWordIterator *ft_doc_word_iter_;
   common::ObArenaAllocator ft_doc_word_allocator_;
   storage::ObFTParseHelper ft_parse_helper_;
+  // Reused for normal-sized documents so each FTS DML row does not rebuild
+  // the same token-frequency hash buckets.
+  storage::ObFTWordMap word_map_;
   bool is_inited_;
 };
 

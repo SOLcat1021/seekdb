@@ -859,6 +859,8 @@ void ObFTDMLIterator::reset()
 {
   is_inited_ = false;
   data_plane::reset_ft_doc_word_iterator(ft_doc_word_iter_);
+  word_map_.destroy();
+  word_map_.get_local_allocer().reserve(0);
   ft_parse_helper_.reset();
   ObDomainDMLIterator::reset();
 }
@@ -942,6 +944,12 @@ int ObFTDMLIterator::init(
       }
       default: {
         ret = OB_ERR_UNEXPECTED;
+      }
+    }
+    if (OB_SUCC(ret)) {
+      // Keep a small freelist for the common document size. Large documents
+      // use the original per-call map path below and are not retained here.
+      if (OB_FAIL(word_map_.get_local_allocer().reserve(256))) {
       }
     }
     if (OB_SUCC(ret)) {
@@ -1043,13 +1051,16 @@ int ObFTDMLIterator::generate_ft_word_rows(const ObChunkDatumStore::StoredRow *s
 
   if (!is_update_ && OB_FAIL(get_ft_and_doc_id(store_row, doc_id_datum, ft, ft_meta))) {
   } else if (is_update_ && OB_FAIL(get_ft_and_doc_id_for_update(store_row, doc_id_datum, ft, ft_meta))) {
+  } else if (word_map_.created() && OB_FAIL(word_map_.reuse())) {
   } else if (OB_FAIL(ObDASDomainUtils::generate_fulltext_word_rows(allocator_,
                                                                    &ft_parse_helper_,
                                                                    ft_meta,
                                                                    doc_id_datum,
                                                                    ft,
                                                                    is_fts_index_aux,
-                                                                   rows_))) {
+                                                                   rows_,
+                                                                   ft.length() <= OB_MALLOC_NORMAL_BLOCK_SIZE
+                                                                     ? &word_map_ : nullptr))) {
     if (OB_UNLIKELY(OB_ITER_END != ret)) {
     }
   }
