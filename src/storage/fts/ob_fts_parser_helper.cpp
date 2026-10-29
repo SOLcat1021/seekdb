@@ -335,12 +335,7 @@ int ObFTParseHelper::init(
   } else if (OB_ISNULL(allocator) || OB_UNLIKELY(parser_name.empty())) {
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(parser_name_.parse_from_str(parser_name.ptr(), parser_name.length()))) {
-  // ObFTParserProperty starts with the same defaults used for an empty
-  // property document.  Empty properties are the common TOKENIZE/DDL form;
-  // skip rebuilding a temporary JSON tree in that case.  Non-empty values
-  // still take the full validation path.
-  } else if (!parser_properties.empty()
-             && OB_FAIL(parser_property_.parse_for_parser_helper(parser_name_, parser_properties))) {
+  } else if (OB_FAIL(parser_property_.parse_for_parser_helper(parser_name_, parser_properties))) {
   } else if (OB_FAIL(parser_name_.get_desc(parser_desc_))) {
   } else if (OB_ISNULL(parser_desc_)) {
     ret = OB_ERR_UNEXPECTED;
