@@ -36,7 +36,12 @@ int ObIKQuantifierProcessor::do_process(TokenizeContext &ctx,
 {
   int ret = OB_SUCCESS;
   // it do have an order, process number first
-  if (OB_FAIL(process_CN_number(ctx, ch, char_len, type))) {
+  // With no pending number/count state, non-Chinese input cannot produce a
+  // quantifier token.  Keep the stateful path for separators following a
+  // number, but skip both scanners for the overwhelmingly common idle path.
+  if (type != ObFTCharUtil::CharType::CHINESE
+      && start_ == -1 && end_ == -1 && count_hits_.empty()) {
+  } else if (OB_FAIL(process_CN_number(ctx, ch, char_len, type))) {
   } else if (OB_FAIL(process_CN_count(ctx, ch, char_len, type))) {
   }
   return ret;
