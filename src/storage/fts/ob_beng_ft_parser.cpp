@@ -55,12 +55,27 @@ int ObBEngFTParser::get_next_token(
       } else {
         begin = 0;
         end = token.len_;
-        while (begin < end && !ob_isalnum(cs_, token.ptr_[begin])) {
-          ++begin;
-        }
-        found_alnum = begin < end;
-        while (end > begin && !ob_isalnum(cs_, token.ptr_[end - 1])) {
-          --end;
+        const bool utf8mb4 = cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI
+                             || cs_->number == CS_TYPE_UTF8MB4_BIN;
+        const auto is_ascii_alnum = [](const unsigned char c) {
+          return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                 || (c >= '0' && c <= '9');
+        };
+        // The whitespace tokenizer already split punctuation. If both edges
+        // are ASCII alnum, the legacy trim cannot remove anything; avoid two
+        // charset-table calls while preserving the fallback for all other
+        // collations and malformed/non-ASCII edges.
+        if (utf8mb4 && is_ascii_alnum(static_cast<unsigned char>(token.ptr_[0]))
+            && is_ascii_alnum(static_cast<unsigned char>(token.ptr_[token.len_ - 1]))) {
+          found_alnum = true;
+        } else {
+          while (begin < end && !ob_isalnum(cs_, token.ptr_[begin])) {
+            ++begin;
+          }
+          found_alnum = begin < end;
+          while (end > begin && !ob_isalnum(cs_, token.ptr_[end - 1])) {
+            --end;
+          }
         }
       }
     }
