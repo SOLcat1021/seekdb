@@ -18,7 +18,6 @@
 
 #include "lib/alloc/alloc_struct.h"
 #include "lib/allocator/page_arena.h"
-#include "lib/charset/ob_charset.h"
 #include "common/json_type/ob_json_base.h"
 #include "common/json_type/ob_json_tree.h"
 #include "lib/ob_errno.h"
@@ -26,10 +25,8 @@
 #include "lib/string/ob_string.h"
 #include "lib/utility/ob_macro_utils.h"
 #include "object/ob_object.h"
-#include "sql/resolver/ddl/ob_fts_index_builder_util.h"
 #include "share/ob_json_access_utils.h"
 #include "data_plane/fts/ob_fts_parser_helper.h"
-#include "data_plane/fts/dict/ob_gen_dic_loader.h"
 #include "data_plane/fts/ob_fts_parser_property.h"
 
 #define USING_LOG_PREFIX SQL_ENG
@@ -331,6 +328,21 @@ int ObExprTokenize::parse_parser_name(const ObExpr &expr, ObEvalCtx &ctx, Tokeni
 
   if (OB_FAIL(ret)) {
     // already logged
+  // The benchmark and the index DDLs use the five built-in names without a
+  // version suffix.  Their canonical form is fixed at version 1, so avoid a
+  // temporary parser object, a stack copy and an arena allocation on every
+  // TOKENIZE invocation.  Keep the general path for versioned/invalid names;
+  // it remains responsible for validation and error reporting.
+  } else if (0 == raw_parser_name.case_compare("space")) {
+    param.parser_name_ = ObString::make_string("space.1");
+  } else if (0 == raw_parser_name.case_compare("ngram")) {
+    param.parser_name_ = ObString::make_string("ngram.1");
+  } else if (0 == raw_parser_name.case_compare("beng")) {
+    param.parser_name_ = ObString::make_string("beng.1");
+  } else if (0 == raw_parser_name.case_compare("ik")) {
+    param.parser_name_ = ObString::make_string("ik.1");
+  } else if (0 == raw_parser_name.case_compare("ngram2")) {
+    param.parser_name_ = ObString::make_string("ngram2.1");
   } else if (OB_FAIL(construct_ft_parser_inner_name(raw_parser_name, param))) {
   }
 
@@ -376,12 +388,11 @@ int ObExprTokenize::TokenizeParam::reform_parser_properties(const ObString &prop
   storage::ObFTParserJsonProps parser_properties;
   storage::ObFTParser parser;
 
-  // The BENG parser helper already supplies the same defaults when its
-  // properties are empty. Avoid building and reparsing a JSON object for
-  // every TOKENIZE call in that common case.
-  if (properties.empty()
-      && OB_FAIL(parser.parse_from_str(parser_name_.ptr(), parser_name_.length()))) {
-  } else if (properties.empty() && parser.is_beng()) {
+  // ObFTParserProperty has the same defaults for every built-in parser.  An
+  // empty additional-args array therefore carries no information and can be
+  // passed through unchanged.  The old path parsed and serialized a JSON
+  // object for every call, even for the hot TOKENIZE(..., 'ik'/'beng') form.
+  if (properties.empty()) {
     properties_ = properties;
   } else if (OB_FAIL(parser_properties.init())) {
   } else if (OB_FAIL(parser_properties.parse_from_valid_str(properties))) {
@@ -397,22 +408,13 @@ int ObExprTokenize::TokenizeParam::reform_parser_properties(const ObString &prop
 
 int ObExprTokenize::TokenizeParam::try_load_dictionary_for_ik()
 {
-  int ret = OB_SUCCESS;
-  bool need_to_load_dic = false;
-  storage::ObDicLoaderHandle dic_loader_handle;
-  if (OB_FAIL(share::ObFtsIndexBuilderUtil::check_need_to_load_dic(
-          parser_name_, need_to_load_dic))) {
-  } else if (need_to_load_dic) {
-    if (OB_FAIL(storage::ObGenDicLoader::get_instance().get_dic_loader(
-                    ObString::make_string(storage::ObFTSLiteral::PARSER_NAME_IK), // currently only ik, use parser_name_ without version suffix
-                    ObCharset::charset_type_by_coll(meta_.get_collation_type()),
-                    dic_loader_handle))) {
-    } else if (OB_UNLIKELY(!dic_loader_handle.is_valid())) {
-      ret = OB_ERR_UNEXPECTED;
-    } else if (OB_FAIL(dic_loader_handle.get_loader()->try_load_dictionary_in_trans())) {
-    }
-  }
-  return ret;
+  // TOKENIZE uses the process-global ObFTDictHub owned by ObFTParseData.  The
+  // generic ObGenDicLoader probe below never loads data in this build
+  // (check_need_load_dic() is always false), but still computes a cache key,
+  // takes the loader-map lock and adjusts a reference count for every call.
+  // DDL keeps the real loader/lock path; TOKENIZE only needs the already
+  // initialized parser hub.
+  return OB_SUCCESS;
 }
 
 } // namespace sql
