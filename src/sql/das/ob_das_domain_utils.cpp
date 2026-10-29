@@ -139,11 +139,9 @@ void ObFTIndexRowCache::reset()
 
 void ObFTIndexRowCache::reuse()
 {
-  // Release references to document-owned token bytes before resetting their
-  // arena. Retain buckets/nodes only for bounded-size documents.
-  if (word_map_.created()) {
-    word_map_.reuse();
-  }
+  // The next generate_fulltext_word_rows() call clears word_map_ before it
+  // reads or writes any key.  Avoid scanning the same buckets twice; map
+  // nodes do not dereference their shallow word keys while being cleared.
   rows_.reuse();
   row_idx_ = 0;
   if (OB_NOT_NULL(merge_memctx_)) {
