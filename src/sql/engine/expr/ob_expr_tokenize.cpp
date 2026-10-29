@@ -396,8 +396,14 @@ int ObExprTokenize::TokenizeParam::reform_parser_properties(const ObString &prop
   // the other parsers still need rebuild_props_for_ddl() to materialize their
   // default table/mode settings; passing an empty object through for them
   // makes the parser look up missing keys and returns OB_SEARCH_NOT_FOUND.
-  if (properties.empty()
-      && OB_FAIL(parser.parse_from_str(parser_name_.ptr(), parser_name_.length()))) {
+  // parse_parser_name() canonicalizes the built-in shorthand to beng.1.  The
+  // common empty-properties BENG call can therefore bypass parser decoding as
+  // well as JSON materialization; versioned/other parser names retain the
+  // parser object path and its validation.
+  if (properties.empty() && 0 == parser_name_.case_compare("beng.1")) {
+    properties_ = properties;
+  } else if (properties.empty()
+             && OB_FAIL(parser.parse_from_str(parser_name_.ptr(), parser_name_.length()))) {
   } else if (properties.empty() && parser.is_beng()) {
     properties_ = properties;
   } else if (OB_FAIL(parser_properties.init())) {
