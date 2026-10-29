@@ -54,6 +54,7 @@ public:
                "row_count", rows_.count());
 private:
   lib::MemoryContext merge_memctx_;
+  common::ObArenaAllocator parser_allocator_;
   ObDomainIndexRow rows_;
   uint64_t row_idx_;
   bool is_fts_index_aux_;
@@ -361,6 +362,7 @@ public:
     doc_word_info_(ft_doc_word_info),
     ft_doc_word_iter_(nullptr),
     ft_doc_word_allocator_(allocator),
+    parser_allocator_(),
     ft_parse_helper_(),
     word_map_(),
     is_inited_(false)
@@ -395,6 +397,7 @@ private:
   const ObFTDocWordInfo *doc_word_info_;
   data_plane::ObFTDocWordIterator *ft_doc_word_iter_;
   common::ObArenaAllocator ft_doc_word_allocator_;
+  common::ObArenaAllocator parser_allocator_;
   storage::ObFTParseHelper ft_parse_helper_;
   // Reused for normal-sized documents so each FTS DML row does not rebuild
   // the same token-frequency hash buckets.

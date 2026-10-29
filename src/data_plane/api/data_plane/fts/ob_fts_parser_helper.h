@@ -221,6 +221,11 @@ private:
       const int64_t fulltext_len,
       common::ObIAllocator &allocator,
       ObAddWord &add_word);
+  int segment_with_cache(
+      const ObCharsetInfo *cs,
+      const char *fulltext,
+      int64_t fulltext_len,
+      ObAddWord &add_word) const;
   int set_add_word_flag(const ObIFTParserDesc &ftparser_desc);
 private:
   common::ObIAllocator *allocator_;
@@ -228,6 +233,8 @@ private:
   ObFTParser parser_name_;
   ObAddWordFlag add_word_flag_;
   ObFTParserProperty parser_property_;
+  mutable ObITokenIterator *cached_iter_;
+  mutable ObFTParserParam cached_param_;
   bool is_inited_;
 
 private:

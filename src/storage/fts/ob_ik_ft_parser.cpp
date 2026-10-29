@@ -102,6 +102,38 @@ int ObIKFTParser::get_next_token(const char *&word,
   return ret;
 }
 
+int ObIKFTParser::reset_for_reuse(const ObFTParserParam &param)
+{
+  int ret = OB_SUCCESS;
+  ObCollationType coll_type = ObCollationType::CS_TYPE_INVALID;
+  if (!IS_INIT || OB_ISNULL(param.cs_) || OB_ISNULL(param.allocator_)
+      || OB_ISNULL(param.fulltext_) || param.ft_length_ <= 0) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_UNLIKELY(param.parser_version_ != ObFTParser::BUILTIN_VERSION)) {
+    ret = OB_NOT_SUPPORTED;
+  } else if (CS_TYPE_INVALID == (coll_type = ObCharset::collation_type(param.cs_->name))
+             || coll_type != coll_type_
+             || param.allocator_ != &allocator_
+             || (param.ik_param_.mode_ == ObFTIKParam::Mode::SMART) != ctx_->is_smart()) {
+    ret = OB_NOT_SUPPORTED;
+  } else {
+    for (ObIIKProcessor *segmenter : segmenters_) {
+      if (OB_NOT_NULL(segmenter)) {
+        segmenter->reset_state();
+      }
+    }
+    // All processor lists and context result lists are now empty. Reclaim
+    // their nodes before preparing the next document while keeping the
+    // parser objects and dictionary wrappers alive in allocator_.
+    ctx_->reset_resource();
+    scratch_allocator_.reuse();
+    if (OB_FAIL(ctx_->reset_input(
+                   param.fulltext_, param.ft_length_, param.ik_param_.mode_ == ObFTIKParam::Mode::SMART))) {
+    }
+  }
+  return ret;
+}
+
 int ObIKFTParser::produce()
 {
   int ret = OB_SUCCESS;
@@ -279,7 +311,7 @@ int ObIKFTParser::init_ctx(const ObFTParserParam &param)
   } else if (OB_ISNULL(ctx_ = OB_NEWx(TokenizeContext,
                                       &allocator_,
                                       coll_type_,
-                                      allocator_,
+                                      scratch_allocator_,
                                       param.fulltext_,
                                       param.ft_length_,
                                       param.ik_param_.mode_ == ObFTIKParam::Mode::SMART))) {
@@ -304,11 +336,11 @@ int ObIKFTParser::init_segmenter(const ObFTParserParam &param)
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else if (OB_ISNULL(dict_quan_)) {
     ret = OB_ERR_UNEXPECTED;
-  } else if (OB_ISNULL(cnqsg = OB_NEWx(ObIKQuantifierProcessor, &allocator_, *dict_quan_, allocator_))) {
+  } else if (OB_ISNULL(cnqsg = OB_NEWx(ObIKQuantifierProcessor, &allocator_, *dict_quan_, scratch_allocator_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else if (OB_ISNULL(dict_main_)) {
     ret = OB_ERR_UNEXPECTED;
-  } else if (OB_ISNULL(cjksg = OB_NEWx(ObIKCJKProcessor, &allocator_, *dict_main_, allocator_))) {
+  } else if (OB_ISNULL(cjksg = OB_NEWx(ObIKCJKProcessor, &allocator_, *dict_main_, scratch_allocator_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else if (OB_ISNULL(surrogate_seg = OB_NEWx(ObIKSurrogateProcessor, &allocator_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;

@@ -37,6 +37,7 @@ class ObIKFTParser final : public ObITokenIterator
 public:
   ObIKFTParser(ObIAllocator &allocator, ObFTDictHub *hub)
       : allocator_(allocator),
+        scratch_allocator_(lib::ObMemAttr("IK Scratch")),
         is_inited_(false),
         coll_type_(ObCollationType::CS_TYPE_INVALID),
         ctx_(nullptr),
@@ -58,6 +59,7 @@ public:
                      int64_t &word_len,
                      int64_t &char_cnt,
                      int64_t &word_freq) override;
+  int reset_for_reuse(const ObFTParserParam &param) override;
 
   VIRTUAL_TO_STRING_KV(K(is_inited_));
 
@@ -91,6 +93,7 @@ private:
 private:
   static constexpr int SEGMENT_LIMIT = 1000;
   ObIAllocator &allocator_;
+  ObArenaAllocator scratch_allocator_;
   bool is_inited_;
 
   ObCollationType coll_type_;
