@@ -197,10 +197,13 @@ int ObExprTokenize::parse_param(const ObExpr &expr,
 
   ObDatum *parser_params_datum;
   ObString raw_parser_name = ObString::make_string(OB_DEFAULT_FULLTEXT_PARSER_NAME);
-
-  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
-  
-  MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator());
+  // eval_tokenize() already owns the per-expression temporary arena and keeps
+  // it alive through parsing, tokenization and JSON packing.  Re-entering a
+  // TempAllocGuard here creates a second arena for every short TOKENIZE call,
+  // even though all parser argument evaluation can use the caller's arena.
+  // Keep one lifecycle for the whole expression and preserve the existing
+  // allocator ownership of parser properties.
+  MultimodeAlloctor temp_allocator(allocator);
 
   if (OB_UNLIKELY(expr.arg_cnt_ < 1 || expr.arg_cnt_ > 3)) {
     ret = OB_INVALID_ARGUMENT;
