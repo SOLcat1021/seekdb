@@ -79,17 +79,30 @@ int ObExprTokenize::tokenize_fulltext(const TokenizeParam &param,
 {
   int ret = OB_SUCCESS;
   storage::ObFTParseHelper tokenize_helper;
+  static thread_local storage::ObFTParseHelper beng_helper;
+  static thread_local bool beng_helper_inited = false;
   const int64_t ft_word_bkt_cnt = MIN(MAX(param.fulltext_.length() / 2, 2), 997);
   int64_t doc_len = 0;
-  storage::ObFTWordMap token_map;
+  static thread_local storage::ObFTWordMap token_map;
+  const bool default_beng = 0 == param.parser_name_.case_compare("beng.1")
+                            && param.properties_.empty();
 
   if (TokenizeParam::OUTPUT_MODE::DEFAULT != mode && TokenizeParam::OUTPUT_MODE::ALL != mode) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (OB_FAIL(tokenize_helper.init(&allocator, param.parser_name_, param.properties_))) {
-  } else if (OB_FAIL(token_map.create(ft_word_bkt_cnt, common::ObMemAttr("FTWordMap")))) {
+  } else if (default_beng && !beng_helper_inited
+             && OB_FAIL(beng_helper.init(&allocator, param.parser_name_, param.properties_))) {
+  } else if (default_beng && !beng_helper_inited) {
+    beng_helper_inited = true;
+  } else if (default_beng && OB_FAIL(beng_helper.bind_allocator(&allocator))) {
+  } else if (!default_beng && OB_FAIL(tokenize_helper.init(&allocator, param.parser_name_, param.properties_))) {
+  } else if (!token_map.created() && OB_FAIL(token_map.create(ft_word_bkt_cnt, common::ObMemAttr("FTWordMap")))) {
+  } else if (token_map.created() && token_map.bucket_count() < ft_word_bkt_cnt
+             && (OB_FAIL(token_map.destroy()) || OB_FAIL(token_map.create(ft_word_bkt_cnt,
+                                                                           common::ObMemAttr("FTWordMap"))))) {
+  } else if (OB_FAIL(token_map.reuse())) {
   } else if (
       (0 != param.fulltext_.length())
-      && OB_FAIL(tokenize_helper.segment(
+      && OB_FAIL((default_beng ? beng_helper : tokenize_helper).segment(
                      param.meta_,
                      param.fulltext_.ptr(),
                      param.fulltext_.length(),
@@ -98,14 +111,14 @@ int ObExprTokenize::tokenize_fulltext(const TokenizeParam &param,
   } else {
     switch (param.output_mode_) {
     case TokenizeParam::OUTPUT_MODE::DEFAULT: {
-      if (OB_FAIL(tokenize_helper.make_token_array_json(token_map, result))) {
+      if (OB_FAIL((default_beng ? beng_helper : tokenize_helper).make_token_array_json(token_map, result))) {
       } else {
         // pass
       }
       break;
     }
     case TokenizeParam::OUTPUT_MODE::ALL: {
-      if (OB_FAIL(tokenize_helper.make_detail_json(token_map, doc_len, result))) {
+      if (OB_FAIL((default_beng ? beng_helper : tokenize_helper).make_detail_json(token_map, doc_len, result))) {
       } else {
         // pass
       }

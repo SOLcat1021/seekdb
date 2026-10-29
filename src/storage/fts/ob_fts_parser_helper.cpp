@@ -350,6 +350,19 @@ int ObFTParseHelper::init(
   return ret;
 }
 
+int ObFTParseHelper::bind_allocator(common::ObIAllocator *allocator)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(allocator)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_UNLIKELY(!is_inited_)) {
+    ret = OB_NOT_INIT;
+  } else {
+    allocator_ = allocator;
+  }
+  return ret;
+}
+
 void ObFTParseHelper::reset()
 {
   parser_desc_ = nullptr;

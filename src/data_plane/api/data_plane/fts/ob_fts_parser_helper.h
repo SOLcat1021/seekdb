@@ -161,6 +161,11 @@ public:
       common::ObIAllocator *allocator,
       const common::ObString &parser_name,
       const common::ObString &parser_properties);
+
+  // Rebind only the scratch allocator when a previously initialized helper is
+  // reused for another synchronous TOKENIZE call. Parser metadata and the
+  // built-in descriptor remain immutable for the cached helper.
+  int bind_allocator(common::ObIAllocator *allocator);
   /**
    * Split document into multiple words
    *

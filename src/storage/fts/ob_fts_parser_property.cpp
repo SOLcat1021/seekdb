@@ -1016,50 +1016,57 @@ int ObFTParserJsonProps::show_parser_properties(const ObFTParserJsonProps &prope
 int ObFTParserProperty::parse_for_parser_helper(const ObFTParser &parser, const ObString &json_str)
 {
   int ret = OB_SUCCESS;
-  ObFTParserJsonProps props;
-  if (OB_FAIL(props.init())) {
-  } else if (OB_FAIL(props.parse_from_valid_str(json_str))) {
-  } else {
+  // Built-in parsers have fixed defaults when no additional properties are
+  // supplied. Avoid constructing and parsing a temporary JSON tree on every
+  // TOKENIZE call; the non-empty path below retains full validation.
+  if (json_str.empty()) {
     if (parser.is_ik()) {
-      // set dict tables and copy dict name
+      dict_table_ = ObString(ObFTSLiteral::CONFIG_NAME_DICT_TABLE);
+      stopword_table_ = ObString(ObFTSLiteral::CONFIG_NAME_STOPWORD_TABLE);
+      quantifier_table_ = ObString(ObFTSLiteral::CONFIG_NAME_QUANTIFIER_TABLE);
+      ik_mode_smart_ = true;
+    } else if (parser.is_space()) {
+      min_token_size_ = ObFTSLiteral::FT_DEFAULT_MIN_TOKEN_SIZE;
+      max_token_size_ = ObFTSLiteral::FT_DEFAULT_MAX_TOKEN_SIZE;
+    } else if (parser.is_ngram()) {
+      ngram_token_size_ = ObFTSLiteral::FT_DEFAULT_NGRAM_TOKEN_SIZE;
+    } else if (parser.is_beng()) {
+      min_token_size_ = ObFTSLiteral::FT_DEFAULT_MIN_TOKEN_SIZE;
+      max_token_size_ = ObFTSLiteral::FT_DEFAULT_MAX_TOKEN_SIZE;
+    } else if (parser.is_ngram2()) {
+      min_ngram_token_size_ = ObFTSLiteral::FT_DEFAULT_MIN_NGRAM_SIZE;
+      max_ngram_token_size_ = ObFTSLiteral::FT_DEFAULT_MAX_NGRAM_SIZE;
+    }
+  } else {
+    ObFTParserJsonProps props;
+    if (OB_FAIL(props.init())) {
+    } else if (OB_FAIL(props.parse_from_valid_str(json_str))) {
+    } else if (parser.is_ik()) {
       dict_table_ = ObString(ObFTSLiteral::CONFIG_NAME_DICT_TABLE);
       stopword_table_ = ObString(ObFTSLiteral::CONFIG_NAME_STOPWORD_TABLE);
       quantifier_table_ = ObString(ObFTSLiteral::CONFIG_NAME_QUANTIFIER_TABLE);
       ObString ik_smart;
       if (OB_FAIL(props.config_get_ik_mode(ik_smart))) {
+      } else if (0 == ik_smart.case_compare(ObString(ObFTSLiteral::FT_IK_MODE_SMART))) {
+        ik_mode_smart_ = true;
+      } else if (0 == ik_smart.case_compare(ObString(ObFTSLiteral::FT_IK_MODE_MAX_WORD))) {
+        ik_mode_smart_ = false;
       } else {
-        if (0 == ik_smart.case_compare(ObString(ObFTSLiteral::FT_IK_MODE_SMART))) {
-          ik_mode_smart_ = true;
-        } else if (0 == ik_smart.case_compare(ObString(ObFTSLiteral::FT_IK_MODE_MAX_WORD))) {
-          ik_mode_smart_ = false;
-        } else {
-          ret = OB_INVALID_ARGUMENT;
-        }
+        ret = OB_INVALID_ARGUMENT;
       }
     } else if (parser.is_space()) {
-      if (json_str.empty()) {
-        min_token_size_ = ObFTSLiteral::FT_DEFAULT_MIN_TOKEN_SIZE;
-        max_token_size_ = ObFTSLiteral::FT_DEFAULT_MAX_TOKEN_SIZE;
-      } else if (OB_FAIL(props.config_get_min_token_size(min_token_size_))) {
+      if (OB_FAIL(props.config_get_min_token_size(min_token_size_))) {
       } else if (OB_FAIL(props.config_get_max_token_size(max_token_size_))) {
       }
     } else if (parser.is_ngram()) {
-      if (json_str.empty()) {
-        ngram_token_size_ = ObFTSLiteral::FT_DEFAULT_NGRAM_TOKEN_SIZE;
-      } else if (OB_FAIL(props.config_get_ngram_token_size(ngram_token_size_))) {
+      if (OB_FAIL(props.config_get_ngram_token_size(ngram_token_size_))) {
       }
     } else if (parser.is_beng()) {
-      if (json_str.empty()) {
-        min_token_size_ = ObFTSLiteral::FT_DEFAULT_MIN_TOKEN_SIZE;
-        max_token_size_ = ObFTSLiteral::FT_DEFAULT_MAX_TOKEN_SIZE;
-      } else if (OB_FAIL(props.config_get_min_token_size(min_token_size_))) {
+      if (OB_FAIL(props.config_get_min_token_size(min_token_size_))) {
       } else if (OB_FAIL(props.config_get_max_token_size(max_token_size_))) {
       }
     } else if (parser.is_ngram2()) {
-      if (json_str.empty()) {
-        min_ngram_token_size_ = ObFTSLiteral::FT_DEFAULT_MIN_NGRAM_SIZE;
-        max_ngram_token_size_ = ObFTSLiteral::FT_DEFAULT_MAX_NGRAM_SIZE;
-      } else if (OB_FAIL(props.config_get_min_ngram_token_size(min_ngram_token_size_))) {
+      if (OB_FAIL(props.config_get_min_ngram_token_size(min_ngram_token_size_))) {
       } else if (OB_FAIL(props.config_get_max_ngram_token_size(max_ngram_token_size_))) {
       }
     }
