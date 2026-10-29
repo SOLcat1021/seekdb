@@ -71,10 +71,20 @@ int ObBEngFTParser::get_next_token(
       const char *source = token.ptr_ + begin;
       const uint32_t length = end - begin;
       bool ascii = cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI || cs_->number == CS_TYPE_UTF8MB4_BIN;
+      bool needs_lower = false;
       for (uint32_t i = 0; ascii && i < length; ++i) {
-        ascii = static_cast<unsigned char>(source[i]) < 0x80;
+        const unsigned char c = static_cast<unsigned char>(source[i]);
+        if (c >= 0x80) {
+          ascii = false;
+        } else if (c >= 'A' && c <= 'Z') {
+          needs_lower = true;
+        }
       }
-      if (ascii) {
+      if (ascii && !needs_lower) {
+        // The source is the input document, which remains alive for the
+        // whole segment call. Avoid an allocation when lowercasing is a no-op.
+        normalized.assign_ptr(source, length);
+      } else if (ascii) {
         char *buffer = static_cast<char *>(allocator_.alloc(length));
         if (OB_ISNULL(buffer)) {
           ret = OB_ALLOCATE_MEMORY_FAILED;
