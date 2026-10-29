@@ -37,15 +37,7 @@ int ObIKLetterProcessor::do_process(TokenizeContext &ctx,
                                     const ObFTCharUtil::CharType type)
 {
   int ret = OB_SUCCESS;
-  // Most IK input characters are CJK or separators.  When no letter token is
-  // open, none of the three letter scanners can observe those characters.
-  // Avoid three state-machine calls on that common path; an open state still
-  // falls through so a separator can flush the pending token.
-  const bool has_pending_letter = english_start_ != -1 || arabic_start_ != -1 || mix_start_ != -1;
-  if (!has_pending_letter
-      && type != ObFTCharUtil::CharType::ENGLISH_LETTER
-      && type != ObFTCharUtil::CharType::ARABIC_LETTER) {
-  } else if (OB_FAIL(process_english_letter(ctx, ch, char_len, type))) {
+  if (OB_FAIL(process_english_letter(ctx, ch, char_len, type))) {
   } else if (OB_FAIL(process_arabic_letter(ctx, ch, char_len, type))) {
   } else if (OB_FAIL(process_mix_letter(ctx, ch, char_len, type))) {
   }
