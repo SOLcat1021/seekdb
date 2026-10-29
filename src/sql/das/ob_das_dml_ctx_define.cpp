@@ -144,7 +144,54 @@ int ObDASDMLIterator::get_next_domain_index_rows(ObDatumRow *&rows, int64_t &row
     if (OB_FAIL(ObDomainDMLIterator::create_domain_dml_iterator(param, domain_iter_))) {
     }
   }
-  if (FAILEDx(domain_iter_->get_next_domain_rows(rows, row_count))) {
+  row_count = 0;
+  // FTS currently returns one document's word rows per call. Coalesce those
+  // rows into the already allocated DAS batch so the downstream write path
+  // sees up to batch_size_ rows at once. Other domain indexes retain their
+  // original contract because their row lifetimes and cardinalities differ.
+  if (OB_SUCC(ret) && das_ctdef_->table_param_.get_data_table().is_fts_index()) {
+    while (OB_SUCC(ret) && row_count < batch_size_) {
+      ObDatumRow *src_rows = nullptr;
+      int64_t src_row_count = 0;
+      const bool from_pending = OB_NOT_NULL(pending_domain_rows_)
+                                && pending_domain_row_idx_ < pending_domain_row_count_;
+      if (from_pending) {
+        src_rows = pending_domain_rows_ + pending_domain_row_idx_;
+        src_row_count = pending_domain_row_count_ - pending_domain_row_idx_;
+      } else if (OB_FAIL(domain_iter_->get_next_domain_rows(src_rows, src_row_count))) {
+        if (OB_ITER_END != ret) {
+        }
+      } else if (OB_UNLIKELY(src_row_count <= 0 || OB_ISNULL(src_rows))) {
+        ret = OB_ERR_UNEXPECTED;
+      }
+
+      if (OB_SUCC(ret)) {
+        const int64_t copy_count = MIN(src_row_count, batch_size_ - row_count);
+        for (int64_t i = 0; OB_SUCC(ret) && i < copy_count; ++i) {
+          if (OB_FAIL(cur_datum_rows_[row_count + i].deep_copy(src_rows[i], allocator_))) {
+          }
+        }
+        row_count += copy_count;
+        if (copy_count < src_row_count) {
+          if (!from_pending) {
+            pending_domain_rows_ = src_rows;
+            pending_domain_row_count_ = src_row_count;
+            pending_domain_row_idx_ = copy_count;
+          } else {
+            pending_domain_row_idx_ += copy_count;
+          }
+        } else {
+          pending_domain_rows_ = nullptr;
+          pending_domain_row_count_ = 0;
+          pending_domain_row_idx_ = 0;
+        }
+      }
+    }
+    if (row_count > 0) {
+      rows = cur_datum_rows_;
+      ret = OB_SUCCESS;
+    }
+  } else if (OB_SUCC(ret) && FAILEDx(domain_iter_->get_next_domain_rows(rows, row_count))) {
     if (OB_ITER_END != ret) {
     }
   }
@@ -239,6 +286,9 @@ int ObDASDMLIterator::rewind(const ObDASDMLBaseCtDef *das_ctdef, const ObFTDocWo
   int ret = common::OB_SUCCESS;
   cur_datum_row_ = nullptr;
   ft_doc_word_info_ = ft_doc_word_info;
+  pending_domain_rows_ = nullptr;
+  pending_domain_row_count_ = 0;
+  pending_domain_row_idx_ = 0;
   if (nullptr != cur_datum_rows_) {
     allocator_.free(cur_datum_rows_);
     cur_datum_rows_ = nullptr;
