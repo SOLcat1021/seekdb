@@ -126,13 +126,12 @@ int ObIKFTParser::process_one_char(TokenizeContext &ctx,
                                    const ObFTCharUtil::CharType type)
 {
   int ret = OB_SUCCESS;
-  // The caller has already read and classified this character.  Passing that
-  // snapshot through avoids every segmenter re-reading the same context.
-  for (ObList<ObIIKProcessor *, ObIAllocator>::iterator iter = segmenters_.begin();
-       OB_SUCC(ret) && iter != segmenters_.end();
-       iter++) {
-    if (OB_FAIL((*iter)->do_process(ctx, ch, char_len, type))) {
-    }
+  // The order is significant.  Concrete calls avoid four list nodes per
+  // parser instance and a virtual dispatch on every input character.
+  if (OB_FAIL(letter_seg_->do_process(ctx, ch, char_len, type))) {
+  } else if (OB_FAIL(quantifier_seg_->do_process(ctx, ch, char_len, type))) {
+  } else if (OB_FAIL(cjk_seg_->do_process(ctx, ch, char_len, type))) {
+  } else if (OB_FAIL(surrogate_seg_->do_process(ctx, ch, char_len, type))) {
   }
   return ret;
 }
@@ -297,38 +296,18 @@ int ObIKFTParser::init_segmenter(const ObFTParserParam &param)
 {
   int ret = OB_SUCCESS;
   // do have an order
-  ObIKLetterProcessor *letter_seg = nullptr;
-  ObIKQuantifierProcessor *cnqsg = nullptr;
-  ObIKCJKProcessor *cjksg = nullptr;
-  ObIKSurrogateProcessor *surrogate_seg = nullptr;
-  if (OB_ISNULL(letter_seg = OB_NEWx(ObIKLetterProcessor, &allocator_))) {
+  if (OB_ISNULL(letter_seg_ = OB_NEWx(ObIKLetterProcessor, &allocator_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else if (OB_ISNULL(dict_quan_)) {
     ret = OB_ERR_UNEXPECTED;
-  } else if (OB_ISNULL(cnqsg = OB_NEWx(ObIKQuantifierProcessor, &allocator_, *dict_quan_, allocator_))) {
+  } else if (OB_ISNULL(quantifier_seg_ = OB_NEWx(ObIKQuantifierProcessor, &allocator_, *dict_quan_, allocator_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else if (OB_ISNULL(dict_main_)) {
     ret = OB_ERR_UNEXPECTED;
-  } else if (OB_ISNULL(cjksg = OB_NEWx(ObIKCJKProcessor, &allocator_, *dict_main_, allocator_))) {
+  } else if (OB_ISNULL(cjk_seg_ = OB_NEWx(ObIKCJKProcessor, &allocator_, *dict_main_, allocator_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
-  } else if (OB_ISNULL(surrogate_seg = OB_NEWx(ObIKSurrogateProcessor, &allocator_))) {
+  } else if (OB_ISNULL(surrogate_seg_ = OB_NEWx(ObIKSurrogateProcessor, &allocator_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
-  } else if (OB_FAIL(segmenters_.push_back(letter_seg))) {
-  } else if (FALSE_IT(letter_seg = nullptr)) {
-  } else if (OB_FAIL(segmenters_.push_back(cnqsg))) {
-  } else if (FALSE_IT(cnqsg = nullptr)) {
-  } else if (OB_FAIL(segmenters_.push_back(cjksg))) {
-  } else if (FALSE_IT(cjksg = nullptr)) {
-  } else if (OB_FAIL(segmenters_.push_back(surrogate_seg))) {
-  } else if (OB_FALSE_IT(surrogate_seg = nullptr)) {
-  }
-  // push back by order, quantifier is before cjk
-
-  if (OB_FAIL(ret)) {
-    OB_DELETEx(ObIKLetterProcessor, &allocator_, letter_seg);
-    OB_DELETEx(ObIKQuantifierProcessor, &allocator_, cnqsg);
-    OB_DELETEx(ObIKCJKProcessor, &allocator_, cjksg);
-    OB_DELETEx(ObIKSurrogateProcessor, &allocator_, surrogate_seg);
   }
   return ret;
 }
@@ -340,13 +319,10 @@ void ObIKFTParser::reset()
     allocator_.free(ctx_);
   }
 
-  for (ObIIKProcessor *segmenter : segmenters_) {
-    if (!OB_ISNULL(segmenter)) {
-      segmenter->~ObIIKProcessor();
-      allocator_.free(segmenter);
-    }
-  }
-  segmenters_.clear();
+  OB_DELETEx(ObIKLetterProcessor, &allocator_, letter_seg_);
+  OB_DELETEx(ObIKQuantifierProcessor, &allocator_, quantifier_seg_);
+  OB_DELETEx(ObIKCJKProcessor, &allocator_, cjk_seg_);
+  OB_DELETEx(ObIKSurrogateProcessor, &allocator_, surrogate_seg_);
 
   cache_main_.reset();
   cache_quan_.reset();
