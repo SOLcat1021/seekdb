@@ -166,6 +166,29 @@ int ObDASDMLIterator::get_next_domain_index_rows(ObDatumRow *&rows, int64_t &row
       }
 
       if (OB_SUCC(ret)) {
+        // Preserve the original zero-copy contract when one document already
+        // provides a complete DAS batch.  The domain iterator keeps its
+        // document arena alive until the next get_next_domain_rows() call, so
+        // returning this slice directly is safe and avoids copying every
+        // datum for long documents.  A partial batch still uses deep_copy()
+        // below because it must be combined with the next document.
+        if (0 == row_count && src_row_count >= batch_size_) {
+          rows = src_rows;
+          row_count = batch_size_;
+          if (from_pending) {
+            pending_domain_row_idx_ += batch_size_;
+          } else {
+            pending_domain_rows_ = src_rows;
+            pending_domain_row_count_ = src_row_count;
+            pending_domain_row_idx_ = batch_size_;
+          }
+          if (pending_domain_row_idx_ >= pending_domain_row_count_) {
+            pending_domain_rows_ = nullptr;
+            pending_domain_row_count_ = 0;
+            pending_domain_row_idx_ = 0;
+          }
+          break;
+        }
         const int64_t copy_count = MIN(src_row_count, batch_size_ - row_count);
         for (int64_t i = 0; OB_SUCC(ret) && i < copy_count; ++i) {
           if (OB_FAIL(cur_datum_rows_[row_count + i].deep_copy(src_rows[i], allocator_))) {
