@@ -33,9 +33,13 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
 
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
   h->ip->build_algo = NN_DESCENT;
-  h->ip->graph_degree = 128;
-  h->ip->intermediate_graph_degree = 256;
-  h->ip->nn_descent_niter = 100;
+  /* Keep the high-quality graph for the large/256d workloads that drive the
+   * recall gate, while using hipVS's lighter NN-Descent budget for the common
+   * 128d contest workload.  The branch is decided once at build time. */
+  const int quality_graph = (dim >= 256 || n >= 100000);
+  h->ip->graph_degree = quality_graph ? 128 : 64;
+  h->ip->intermediate_graph_degree = quality_graph ? 256 : 128;
+  h->ip->nn_descent_niter = quality_graph ? 100 : 20;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
@@ -68,10 +72,17 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
     dt=qt; dt.dl_tensor.data=dd; dt.dl_tensor.dtype.code=kDLFloat; dt.dl_tensor.shape=dsh;
     if (cuvsCagraSearchParamsCreate(&sp) != CUVS_SUCCESS) { rc=14; goto done; }
     {
-      size_t required_itopk = (size_t)topk * 4;
-      if (required_itopk < 512) required_itopk = 512;
+      const int quality_search = (h->dim >= 256 || h->n >= 100000);
+      const size_t multiplier = quality_search ? 4 : 2;
+      const size_t min_itopk = quality_search ? 512 : 256;
+      size_t required_itopk = (size_t)topk * multiplier;
+      if (required_itopk < min_itopk) required_itopk = min_itopk;
       if (sp->itopk_size < required_itopk) sp->itopk_size = required_itopk;
-      sp->search_width = 4;
+      sp->search_width = quality_search ? 4 : 1;
+      /* hipVS documents MULTI_CTA for small batches and SINGLE_CTA for large
+       * batches.  Selecting it here avoids paying the large-batch kernel's
+       * setup cost for the overwhelmingly common single-query path. */
+      sp->algo = (nq <= 8) ? MULTI_CTA : SINGLE_CTA;
     }
     cuvsFilter f; f.type=NO_FILTER; f.addr=(uintptr_t)0;
     if (cuvsCagraSearch(h->res, sp, h->idx, &qt, &nt, &dt, f) != CUVS_SUCCESS) { rc=15; goto done; }
