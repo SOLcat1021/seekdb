@@ -321,11 +321,17 @@ int ObDASDomainUtils::build_ft_doc_word_infos(
                                                  ft_word_map))) {
   } else if (0 == ft_word_map.size()) {
     ret = OB_ITER_END;
+  } else if (OB_FAIL(word_rows.reserve(ft_word_map.size()))) {
   } else if (OB_ISNULL(rows_buf = reinterpret_cast<char *>(
                            allocator.alloc(ft_word_map.size() * sizeof(blocksstable::ObDatumRow))))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else {
     int64_t i = 0;
+    // Column positions are invariant for every word row in this document.
+    const int64_t word_idx = is_fts_index_aux ? 0 : 1;
+    const int64_t doc_id_idx = is_fts_index_aux ? 1 : 0;
+    const int64_t word_cnt_idx = 2;
+    const int64_t doc_len_idx = 3;
     rows = new (rows_buf) blocksstable::ObDatumRow[ft_word_map.size()];
     for (ObFTWordMap::const_iterator iter = ft_word_map.begin();
          OB_SUCC(ret) && iter != ft_word_map.end();
@@ -334,13 +340,6 @@ int ObDASDomainUtils::build_ft_doc_word_infos(
       } else {
         const ObFTWord &ft_word = iter->first;
         const int64_t word_cnt = iter->second;
-        // index row format
-        //  -    FTS_INDEX: [WORD], [DOC_ID], [WORD_COUNT], [DOC_LENGTH]
-        //  - FTS_DOC_WORD: [DOC_ID], [WORD], [WORD_COUNT], [DOC_LENGTH]
-        const int64_t word_idx = is_fts_index_aux ? 0 : 1;
-        const int64_t doc_id_idx = is_fts_index_aux ? 1 : 0;
-        const int64_t word_cnt_idx = 2;
-        const int64_t doc_len_idx = 3;
         rows[i].storage_datums_[word_idx].set_datum(ft_word.get_word());
         rows[i].storage_datums_[doc_id_idx].shallow_copy_from_datum(doc_id_datum);
         rows[i].storage_datums_[word_cnt_idx].set_uint(word_cnt);
