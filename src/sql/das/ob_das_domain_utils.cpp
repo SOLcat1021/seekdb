@@ -1057,7 +1057,6 @@ int ObFTDMLIterator::generate_ft_word_rows(const ObChunkDatumStore::StoredRow *s
 
   if (!is_update_ && OB_FAIL(get_ft_and_doc_id(store_row, doc_id_datum, ft, ft_meta))) {
   } else if (is_update_ && OB_FAIL(get_ft_and_doc_id_for_update(store_row, doc_id_datum, ft, ft_meta))) {
-  } else if (word_map_.created() && OB_FAIL(word_map_.reuse())) {
   } else if (OB_FAIL(ObDASDomainUtils::generate_fulltext_word_rows(allocator_,
                                                                    &ft_parse_helper_,
                                                                    ft_meta,
