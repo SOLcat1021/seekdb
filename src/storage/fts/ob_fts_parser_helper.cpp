@@ -474,7 +474,7 @@ int ObFTParseHelper::segment(
                              cs,
                              fulltext,
                              fulltext_len,
-                             *allocator_,
+                             *add_word_allocator,
                              add_word))) {
       }
       if (OB_SUCC(ret)) {
