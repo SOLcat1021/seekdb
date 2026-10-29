@@ -111,8 +111,7 @@ public:
 
       if (OB_FAIL(builder.init(*trie))) {
       } else if (OB_FAIL(builder.build_from_trie(*trie))) {
-      } else if (OB_FAIL(builder.get_mem_block(dat_buff, buffer_size,
-                                              ObFTDictType::DICT_IK_MAIN == desc_->type_))) {
+      } else if (OB_FAIL(builder.get_mem_block(dat_buff, buffer_size))) {
       } else if (OB_FAIL(ObFTCacheDict::make_and_fetch_cache_entry(*desc_,
                                                                     dat_buff,
                                                                     buffer_size,
@@ -285,8 +284,7 @@ int ObFTRangeDict::build_one_range(const ObFTDictDesc &desc,
     // to do clean up
   } else if (OB_FAIL(builder.init(trie))) {
   } else if (OB_FAIL(builder.build_from_trie(trie))) {
-  } else if (OB_FAIL(builder.get_mem_block(dat_buff, buffer_size,
-                                          ObFTDictType::DICT_IK_MAIN == desc.type_))) {
+  } else if (OB_FAIL(builder.get_mem_block(dat_buff, buffer_size))) {
   } else if (OB_FAIL(container.fetch_info_for_dict(info))) {
   } else if (OB_FAIL(ObFTCacheDict::make_and_fetch_cache_entry(desc,
                                                                dat_buff,
@@ -380,6 +378,19 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
   return last_hit.dict_->match_with_hit(single_word, last_hit, hit);
 }
 
+namespace
+{
+// The dictionary cache uses UTF8MB4_BIN ranges. Compare the bytes first and
+// then the lengths, matching the non-padding binary collation used by the
+// existing linear path.
+int compare_range_key(const ObString &left, const ObString &right)
+{
+  const int64_t len = MIN(left.length(), right.length());
+  const int cmp = len == 0 ? 0 : MEMCMP(left.ptr(), right.ptr(), len);
+  return cmp != 0 ? cmp : left.length() - right.length();
+}
+}
+
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
@@ -403,6 +414,25 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
       ret = OB_ENTRY_NOT_EXIST;
     }
     return ret;
+  }
+  if (ordered_range_lookup_ && !single_word.empty()) {
+    int64_t begin = 0;
+    int64_t end = range_dicts_.size();
+    while (begin < end) {
+      const int64_t mid = begin + (end - begin) / 2;
+      if (compare_range_key(range_dicts_[mid].end_.get_word(), single_word) < 0) {
+        begin = mid + 1;
+      } else {
+        end = mid;
+      }
+    }
+    if (begin < range_dicts_.size()
+        && compare_range_key(range_dicts_[begin].start_.get_word(), single_word) <= 0) {
+      dict = range_dicts_[begin].dict_;
+      return ret;
+    } else {
+      return OB_ENTRY_NOT_EXIST;
+    }
   }
   bool found = false;
   for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
@@ -428,6 +458,7 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
 int ObFTRangeDict::build_dict_from_cache(const ObFTCacheRangeContainer &range_container)
 {
   int ret = OB_SUCCESS;
+  ordered_range_lookup_ = desc_.coll_type_ == ObCollationType::CS_TYPE_UTF8MB4_BIN;
   for (ObList<ObFTCacheRangeHandle *, ObIAllocator>::const_iterator iter = range_container.get_handles().begin();
        OB_SUCC(ret) && iter != range_container.get_handles().end();
        iter++) {
@@ -450,6 +481,13 @@ int ObFTRangeDict::build_dict_from_cache(const ObFTCacheRangeContainer &range_co
                            | (static_cast<uint32_t>(start[1]) << 8) | start[2];
         range.end_key_ = (static_cast<uint32_t>(end[0]) << 16)
                          | (static_cast<uint32_t>(end[1]) << 8) | end[2];
+      }
+      if (ordered_range_lookup_
+          && (compare_range_key(range.start_.get_word(), range.end_.get_word()) > 0
+              || (range_dicts_.size() > 0
+                  && compare_range_key(range_dicts_[range_dicts_.size() - 1].end_.get_word(),
+                                       range.start_.get_word()) >= 0))) {
+        ordered_range_lookup_ = false;
       }
       if (OB_FAIL(range_dicts_.push_back(range))) {
       }

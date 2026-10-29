@@ -18,7 +18,7 @@
 #define _OCEANBASE_STORAGE_FTS_IK_OB_IK_ARBITRATOR_H_
 
 #include "lib/allocator/page_arena.h"
-#include "lib/hash/ob_hashmap.h"
+#include "lib/container/ob_se_array.h"
 #include "lib/utility/ob_macro_utils.h"
 #include "storage/fts/ik/ob_ik_token.h"
 
@@ -43,6 +43,8 @@ private:
 
   int add_chain(ObIKTokenChain *chain);
 
+  int find_chain(int64_t offset, ObIKTokenChain *&chain) const;
+
   int optimize(TokenizeContext &ctx,
                ObIKTokenChain *option,
                ObFTSortList::CellIter iter,
@@ -61,7 +63,10 @@ private:
 
 private:
   ObArenaAllocator alloc_;
-  hash::ObHashMap<int64_t, ObIKTokenChain *> chains_;
+  // Conflict chains are keyed by their starting byte offset.  They are
+  // inserted in document order, so a compact sorted array avoids a hash node
+  // and bucket lookup for the small batches produced by IK.
+  ObSEArray<ObIKTokenChain *, 16> chains_;
 
 private:
   DISALLOW_COPY_AND_ASSIGN(ObIKArbitrator);
