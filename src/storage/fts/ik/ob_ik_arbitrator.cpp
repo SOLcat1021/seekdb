@@ -308,6 +308,10 @@ int ObIKArbitrator::prepare(TokenizeContext &ctx)
 {
   int ret = OB_SUCCESS;
   UNUSED(ctx);
+  // All chains and conflict stacks from the previous batch are scratch
+  // objects allocated from alloc_. Reuse the arena before constructing the
+  // next batch so repeated batches do not allocate fresh pages.
+  alloc_.reuse();
   // Keep the array storage between calls, but discard pointers from the
   // previous document before its arena is reclaimed.
   chains_.reuse();
