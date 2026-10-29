@@ -328,22 +328,24 @@ int ObExprTokenize::parse_parser_name(const ObExpr &expr, ObEvalCtx &ctx, Tokeni
 
   if (OB_FAIL(ret)) {
     // already logged
-  // The benchmark and the index DDLs use the five built-in names without a
-  // version suffix.  Their canonical form is fixed at version 1, so avoid a
-  // temporary parser object, a stack copy and an arena allocation on every
-  // TOKENIZE invocation.  Keep the general path for versioned/invalid names;
-  // it remains responsible for validation and error reporting.
-  } else if (0 == raw_parser_name.case_compare("space")) {
-    param.parser_name_ = ObString::make_string("space.1");
-  } else if (0 == raw_parser_name.case_compare("ngram")) {
-    param.parser_name_ = ObString::make_string("ngram.1");
-  } else if (0 == raw_parser_name.case_compare("beng")) {
-    param.parser_name_ = ObString::make_string("beng.1");
-  } else if (0 == raw_parser_name.case_compare("ik")) {
-    param.parser_name_ = ObString::make_string("ik.1");
-  } else if (0 == raw_parser_name.case_compare("ngram2")) {
-    param.parser_name_ = ObString::make_string("ngram2.1");
-  } else if (OB_FAIL(construct_ft_parser_inner_name(raw_parser_name, param))) {
+  } else {
+    // The benchmark and the index DDLs use the five built-in names without a
+    // version suffix. Their canonical form is fixed at version 1, so avoid a
+    // temporary parser object, a stack copy and an arena allocation on every
+    // TOKENIZE invocation. Keep the general path for versioned/invalid names;
+    // it remains responsible for validation and error reporting.
+    if (0 == raw_parser_name.case_compare("space")) {
+      param.parser_name_ = ObString::make_string("space.1");
+    } else if (0 == raw_parser_name.case_compare("ngram")) {
+      param.parser_name_ = ObString::make_string("ngram.1");
+    } else if (0 == raw_parser_name.case_compare("beng")) {
+      param.parser_name_ = ObString::make_string("beng.1");
+    } else if (0 == raw_parser_name.case_compare("ik")) {
+      param.parser_name_ = ObString::make_string("ik.1");
+    } else if (0 == raw_parser_name.case_compare("ngram2")) {
+      param.parser_name_ = ObString::make_string("ngram2.1");
+    } else if (OB_FAIL(construct_ft_parser_inner_name(raw_parser_name, param))) {
+    }
   }
 
   return ret;
