@@ -388,11 +388,14 @@ int ObExprTokenize::TokenizeParam::reform_parser_properties(const ObString &prop
   storage::ObFTParserJsonProps parser_properties;
   storage::ObFTParser parser;
 
-  // ObFTParserProperty has the same defaults for every built-in parser.  An
-  // empty additional-args array therefore carries no information and can be
-  // passed through unchanged.  The old path parsed and serialized a JSON
-  // object for every call, even for the hot TOKENIZE(..., 'ik'/'beng') form.
-  if (properties.empty()) {
+  // BENG's helper supplies its defaults when the additional-args array is
+  // empty, so that one parser can safely bypass JSON materialization.  IK and
+  // the other parsers still need rebuild_props_for_ddl() to materialize their
+  // default table/mode settings; passing an empty object through for them
+  // makes the parser look up missing keys and returns OB_SEARCH_NOT_FOUND.
+  if (properties.empty()
+      && OB_FAIL(parser.parse_from_str(parser_name_.ptr(), parser_name_.length()))) {
+  } else if (properties.empty() && parser.is_beng()) {
     properties_ = properties;
   } else if (OB_FAIL(parser_properties.init())) {
   } else if (OB_FAIL(parser_properties.parse_from_valid_str(properties))) {
