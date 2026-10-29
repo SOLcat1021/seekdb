@@ -38,7 +38,8 @@ public:
 
   int remove_order_by_for_subquery(ObDMLStmt *stmt, bool &trans_happened);
 
-  int remove_order_by_for_view_stmt(ObDMLStmt *stmt, bool &trans_happened, bool &force_serial_set_order);
+  int remove_order_by_for_view_stmt(ObDMLStmt *stmt, bool &trans_happened,
+                                    bool &force_serial_set_order, const bool count_limited_only = false);
 
   int do_remove_stmt_order_by(ObSelectStmt *select_stmt, bool &trans_happened);
 
