@@ -180,7 +180,8 @@ public:
       const char *fulltext,
       const int64_t fulltext_len,
       int64_t &doc_length,
-      ObFTWordMap &words) const;
+      ObFTWordMap &words,
+      common::ObIAllocator *word_allocator = nullptr) const;
   int check_is_the_same(
       const common::ObString &parser_name,
       const common::ObString &parser_properties,

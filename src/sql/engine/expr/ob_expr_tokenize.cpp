@@ -107,7 +107,8 @@ int ObExprTokenize::tokenize_fulltext(const TokenizeParam &param,
                      param.fulltext_.ptr(),
                      param.fulltext_.length(),
                      doc_len,
-                     token_map))) {
+                     token_map,
+                     &allocator))) {
   } else {
     switch (param.output_mode_) {
     case TokenizeParam::OUTPUT_MODE::DEFAULT: {

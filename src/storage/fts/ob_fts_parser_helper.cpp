@@ -443,7 +443,8 @@ int ObFTParseHelper::segment(
     const char *fulltext,
     const int64_t fulltext_len,
     int64_t &doc_length,
-    ObFTWordMap &words) const
+    ObFTWordMap &words,
+    common::ObIAllocator *word_allocator) const
 {
   int ret = OB_SUCCESS;
   const ObCharsetInfo *cs = nullptr;
@@ -458,22 +459,27 @@ int ObFTParseHelper::segment(
     ret = OB_ERR_UNEXPECTED;
   } else {
     words.reuse();
-    ObAddWord add_word(parser_property_, meta, add_word_flag_, *allocator_, words);
-    if (parser_name_.is_ik()) {
-      if (OB_FAIL(segment_with_cache(cs, fulltext, fulltext_len, add_word))) {
+    common::ObIAllocator *add_word_allocator = nullptr == word_allocator ? allocator_ : word_allocator;
+    if (OB_ISNULL(add_word_allocator)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      ObAddWord add_word(parser_property_, meta, add_word_flag_, *add_word_allocator, words);
+      if (parser_name_.is_ik()) {
+        if (OB_FAIL(segment_with_cache(cs, fulltext, fulltext_len, add_word))) {
+        }
+      } else if (OB_FAIL(segment(
+                             parser_property_,
+                             parser_name_.get_parser_version(),
+                             parser_desc_,
+                             cs,
+                             fulltext,
+                             fulltext_len,
+                             *allocator_,
+                             add_word))) {
       }
-    } else if (OB_FAIL(segment(
-                           parser_property_,
-                           parser_name_.get_parser_version(),
-                           parser_desc_,
-                           cs,
-                           fulltext,
-                           fulltext_len,
-                           *allocator_,
-                           add_word))) {
-    }
-    if (OB_SUCC(ret)) {
-      doc_length = add_word.get_add_word_count();
+      if (OB_SUCC(ret)) {
+        doc_length = add_word.get_add_word_count();
+      }
     }
   }
   LOG_DEBUG("ft parse segment", K(ret), K(type), K(add_word_flag_), K(parser_name_),
