@@ -168,17 +168,24 @@ static void ob_cuvs_register(void *key, const float *vectors, const int64_t *ids
 // Buffer vectors arriving via add_index. Plain HNSW builds BOTH its delta and its
 // snapshot incrementally via add_index (one row at a time), so this is where the
 // real data flows -- unlike build_index which is only used by the HNSW_SQ bulk path.
-static void ob_cuvs_add(void *key, const float *vectors, const int64_t *ids,
+static bool ob_cuvs_add(void *key, const float *vectors, const int64_t *ids,
                         int dim, int size) {
-  if (vectors == nullptr || ids == nullptr || dim <= 0 || size <= 0) { return; }
   std::lock_guard<std::mutex> guard(g_ob_cuvs_mu);
+  if (vectors == nullptr || ids == nullptr || dim <= 0 || size <= 0) {
+    auto it = g_ob_cuvs_reg.find(key);
+    return it != g_ob_cuvs_reg.end() && it->second->vsag_ready_;
+  }
   ObCuvsEntry *&slot = g_ob_cuvs_reg[key];
   if (slot == nullptr) { slot = new ObCuvsEntry(); slot->dim_ = dim; }
   if (slot->dim_ == 0) { slot->dim_ = dim; }
-  if (slot->dim_ != dim) { return; }
-  slot->buf_vecs_.insert(slot->buf_vecs_.end(), vectors,
-                         vectors + static_cast<size_t>(dim) * size);
-  slot->buf_ids_.insert(slot->buf_ids_.end(), ids, ids + size);
+  if (slot->dim_ == dim) {
+    slot->buf_vecs_.insert(slot->buf_vecs_.end(), vectors,
+                           vectors + static_cast<size_t>(dim) * size);
+    slot->buf_ids_.insert(slot->buf_ids_.end(), ids, ids + size);
+  }
+  // Return the fallback state while holding the same lock. Offline DDL can
+  // call add_index once per row, so avoid a second lookup and lock per batch.
+  return slot->vsag_ready_;
 }
 static bool ob_cuvs_vsag_ready(void *key) {
   std::lock_guard<std::mutex> guard(g_ob_cuvs_mu);
@@ -1592,8 +1599,7 @@ int add_index(VectorIndexPtr &index_handler, float *vector,
   ob_vsag_trace("add_dense", (const void*)index_handler, (long)(dim), (long)(size));
   if (ob_cuvs_marked(index_handler) && index_handler != nullptr &&
       strcmp(static_cast<HnswIndexHandler *>(index_handler)->get_metric(), "l2") == 0) {
-    ob_cuvs_add(index_handler, vector, ids, dim, size);
-    if (!ob_cuvs_vsag_ready(index_handler)) {
+    if (!ob_cuvs_add(index_handler, vector, ids, dim, size)) {
       return OB_SUCCESS;
     }
   }
