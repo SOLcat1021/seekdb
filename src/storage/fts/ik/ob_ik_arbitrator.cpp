@@ -32,6 +32,56 @@ namespace oceanbase
 {
 namespace storage
 {
+namespace
+{
+// The input pass already uses this UTF-8 fast path.  The output pass scans the
+// same text again; decode and classify its common valid characters together.
+bool decode_utf8_char(const char *input, int64_t remaining, int64_t &char_len,
+                      ObFTCharUtil::CharType &type, ob_wc_t &unicode)
+{
+  bool valid = false;
+  if (remaining > 0) {
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(input);
+    const uint8_t lead = bytes[0];
+    if (lead < 0x80) {
+      char_len = 1;
+      unicode = lead;
+      type = (lead >= 'a' && lead <= 'z') || (lead >= 'A' && lead <= 'Z')
+                 ? ObFTCharUtil::CharType::ENGLISH_LETTER
+             : (lead >= '0' && lead <= '9')
+                 ? ObFTCharUtil::CharType::ARABIC_LETTER
+                 : ObFTCharUtil::CharType::USELESS;
+      valid = true;
+    } else if (lead >= 0xC2 && lead <= 0xDF && remaining >= 2
+               && (bytes[1] & 0xC0) == 0x80) {
+      char_len = 2;
+      unicode = ((lead & 0x1F) << 6) | (bytes[1] & 0x3F);
+      valid = true;
+    } else if (lead >= 0xE0 && lead <= 0xEF && remaining >= 3
+               && (bytes[1] & 0xC0) == 0x80 && (bytes[2] & 0xC0) == 0x80
+               && (lead != 0xE0 || bytes[1] >= 0xA0)
+               && (lead != 0xED || bytes[1] < 0xA0)) {
+      char_len = 3;
+      unicode = ((lead & 0x0F) << 12) | ((bytes[1] & 0x3F) << 6) | (bytes[2] & 0x3F);
+      valid = true;
+    } else if (lead >= 0xF0 && lead <= 0xF4 && remaining >= 4
+               && (bytes[1] & 0xC0) == 0x80 && (bytes[2] & 0xC0) == 0x80
+               && (bytes[3] & 0xC0) == 0x80
+               && (lead != 0xF0 || bytes[1] >= 0x90)
+               && (lead != 0xF4 || bytes[1] < 0x90)) {
+      char_len = 4;
+      unicode = ((lead & 0x07) << 18) | ((bytes[1] & 0x3F) << 12)
+                | ((bytes[2] & 0x3F) << 6) | (bytes[3] & 0x3F);
+      valid = true;
+    }
+    if (valid && lead >= 0x80) {
+      ObFTCharUtil::classify_unicode(unicode, type);
+    }
+  }
+  return valid;
+}
+} // namespace
+
 int ObIKArbitrator::process(TokenizeContext &ctx)
 {
   int ret = OB_SUCCESS;
@@ -39,8 +89,7 @@ int ObIKArbitrator::process(TokenizeContext &ctx)
   ObList<ObIKToken, ObIAllocator> &tokens = ctx.token_list().tokens();
   ObIKTokenChain *chain_need_arbitrate = nullptr;
   bool use_smart = ctx.is_smart();
-  if (OB_FAIL(prepare(ctx))) {
-  } else if (OB_ISNULL(chain_need_arbitrate = OB_NEWx(ObIKTokenChain, &alloc_, alloc_))) {
+  if (OB_ISNULL(chain_need_arbitrate = OB_NEWx(ObIKTokenChain, &alloc_, alloc_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
     LOG_WARN("alloc memory failed");
   } else {
@@ -113,25 +162,38 @@ int ObIKArbitrator::output_result(TokenizeContext &ctx)
 
   int64_t char_len = 0;
   ObIKTokenChain *chain = nullptr;
+  int64_t chain_idx = 0;
   const bool is_utf8mb4 = CHARSET_UTF8MB4 == ObCharset::charset_type_by_coll(ctx.collation());
   for (int64_t current = 0; OB_SUCC(ret) && current < ctx.fulltext_len();) {
     ObFTCharUtil::CharType type;
     ob_wc_t unicode = 0;
     // maybe not so good to keep single, check it later
-    if (OB_FAIL(ObCharset::first_valid_char(ctx.collation(),
-                                            ctx.fulltext() + current,
-                                            ctx.fulltext_len() - current,
-                                            char_len))) {
+    if (is_utf8mb4 && decode_utf8_char(ctx.fulltext() + current,
+                                        ctx.fulltext_len() - current,
+                                        char_len, type, unicode)) {
+      // Decoded the common valid UTF-8 case without a second charset lookup.
+    } else if (OB_FAIL(ObCharset::first_valid_char(ctx.collation(),
+                                                   ctx.fulltext() + current,
+                                                   ctx.fulltext_len() - current,
+                                                   char_len))) {
     } else if (OB_FAIL(ObFTCharUtil::classify_first_char(ctx.collation(),
-                                                         ctx.fulltext() + current,
-                                                         char_len,
-                                                         type,
-                                                         unicode))) {
+                                                        ctx.fulltext() + current,
+                                                        char_len, type, unicode))) {
+    }
+    if (OB_FAIL(ret)) {
     } else if (ObFTCharUtil::CharType::USELESS == type) {
       current += char_len; // skip useless char
-    } else if (OB_FAIL(chains_.get_refactored(current, chain)) && OB_HASH_NOT_EXIST != ret) {
-    } else if (OB_HASH_NOT_EXIST == ret) {
-      ret = OB_SUCCESS;
+    } else {
+      while (chain_idx < chains_.count() && chains_.at(chain_idx)->min_offset() < current) {
+        ++chain_idx;
+      }
+      chain = chain_idx < chains_.count() && chains_.at(chain_idx)->min_offset() == current
+                  ? chains_.at(chain_idx++) : nullptr;
+    }
+    if (OB_FAIL(ret)) {
+    } else if (ObFTCharUtil::CharType::USELESS == type) {
+      // Already advanced over this character above.
+    } else if (nullptr == chain) {
       if (!keep_single()) {
         // skip single word
       } else {
@@ -304,17 +366,6 @@ int ObIKArbitrator::remove_conflict(const ObIKToken &token, ObIKTokenChain *opti
   return ret;
 }
 
-int ObIKArbitrator::prepare(TokenizeContext &ctx)
-{
-  int ret = OB_SUCCESS;
-
-  int cal_bucket_num = MAX(ctx.fulltext_len() / 100, 10);
-  cal_bucket_num = MIN(cal_bucket_num, 100);
-  if (OB_FAIL(chains_.create(cal_bucket_num, ObMemAttr("IK ARBITRATE")))) {
-  }
-  return ret;
-}
-
 ObIKArbitrator::ObIKArbitrator() : alloc_(lib::ObMemAttr("IK Arbitrator")) {}
 
 int ObIKArbitrator::add_chain(ObIKTokenChain *chain)
@@ -324,14 +375,14 @@ int ObIKArbitrator::add_chain(ObIKTokenChain *chain)
     ret = OB_INVALID_ARGUMENT;
   } else if (chain->list().is_empty()) {
     // no need to add empty chain
-  } else if (OB_FAIL(chains_.set_refactored(chain->min_offset(), chain))) {
+  } else if (OB_FAIL(chains_.push_back(chain))) {
   }
   return ret;
 }
 
 ObIKArbitrator::~ObIKArbitrator()
 {
-  chains_.destroy();
+  chains_.reset();
   alloc_.reset();
 }
 } // namespace storage
