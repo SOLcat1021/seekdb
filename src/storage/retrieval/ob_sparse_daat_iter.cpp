@@ -23,9 +23,35 @@ namespace oceanbase
 namespace storage
 {
 
+namespace
+{
+int compare_binary_doc_id(const ObDatum &left, const ObDatum &right,
+                          int &cmp_ret, const ObDatumAccessContext *access_ctx)
+{
+  // CS_TYPE_BINARY compares bytes including trailing spaces. Document IDs can
+  // also contain encoded variable-length rowkeys, so handle both forms without
+  // repeated charset dispatch. Retain the original path for null/invalid views.
+  if (!left.is_null() && !right.is_null() && nullptr != left.ptr_ && nullptr != right.ptr_) {
+    if (left.len_ == sizeof(common::ObDocId) && right.len_ == sizeof(common::ObDocId)) {
+      cmp_ret = MEMCMP(left.ptr_, right.ptr_, sizeof(common::ObDocId));
+    } else {
+      const uint32_t length = MIN(left.len_, right.len_);
+      cmp_ret = length == 0 ? 0 : MEMCMP(left.ptr_, right.ptr_, length);
+      if (cmp_ret == 0) {
+        cmp_ret = static_cast<int>(static_cast<size_t>(left.len_) - static_cast<size_t>(right.len_));
+      }
+    }
+    return OB_SUCCESS;
+  }
+  return ObDatumFuncs::get_basic_func(ObVarcharType, CS_TYPE_BINARY)->null_first_cmp_(
+      left, right, cmp_ret, access_ctx);
+}
+} // namespace
+
 ObSRMergeCmp::ObSRMergeCmp()
   : cmp_func_(nullptr),
     iter_ids_(nullptr),
+    iter_id_count_(0),
     is_inited_(false)
 {
 }
@@ -38,9 +64,13 @@ int ObSRMergeCmp::init(
   if (OB_ISNULL(iter_ids)) {
     ret = OB_ERR_UNEXPECTED;
   } else {
-    iter_ids_ = iter_ids;
+    iter_ids_ = iter_ids->get_data();
+    iter_id_count_ = iter_ids->count();
     common::ObDatumBasicFuncs *basic_funcs = ObDatumFuncs::get_basic_func(id_meta.type_, id_meta.cs_type_);
     cmp_func_ = basic_funcs->null_first_cmp_;
+    if (ObVarcharType == id_meta.type_ && CS_TYPE_BINARY == id_meta.cs_type_) {
+      cmp_func_ = compare_binary_doc_id;
+    }
     if (OB_ISNULL(cmp_func_)) {
       ret = OB_ERR_UNEXPECTED;
     } else {

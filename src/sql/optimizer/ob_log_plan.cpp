@@ -15,6 +15,7 @@
  */
 
 #define USING_LOG_PREFIX SQL_OPT
+#include "sql/resolver/dml/ob_stmt_expr_visitor.h"
 #include "config_bridge.h"
 #include "ob_log_plan.h"
 #include "sql/optimizer/ob_pwj_comparer.h"
@@ -12037,14 +12038,58 @@ int ObLogPlan::prepare_text_retrieval_scan(const ObIArray<ObRawExpr *> &scan_mat
                                                  table_scan->get_text_retrieval_info()))) {
   } else {
     ObTextRetrievalInfo &tr_info = table_scan->get_text_retrieval_info();
+    if (table_scan->get_index_back()) {
+      tr_info.need_calc_relevance_ = true;
+    }
     tr_info.match_expr_ = match_against;
-    tr_info.pushdown_match_filter_ = match_pred;
+    tr_info.pushdown_match_filter_ = tr_info.need_calc_relevance_ ? match_pred : nullptr;
+    // A bare natural-language MATCH predicate needs membership only. Keep
+    // scoring for other search modes, boosts, subqueries, and score consumers.
+    if (NATURAL_LANGUAGE_MODE == match_against->get_mode_flag()
+        && !match_against->is_es_match()
+        && match_against->get_columns_boosts().empty()
+        && T_OP_BOOL == match_pred->get_expr_type()
+        && 1 == match_pred->get_param_count()
+        && match_pred->get_param_expr(0) == match_against
+        && ObOptimizerUtil::find_item(get_stmt()->get_condition_exprs(), match_pred)
+        && !table_scan->get_index_back()
+        && get_stmt()->is_select_stmt()
+        && !static_cast<const ObSelectStmt *>(get_stmt())->has_order_by()) {
+      ObSEArray<ObSelectStmt *, 4> child_stmts;
+      ObSEArray<ObRawExpr *, 16> relation_exprs;
+      ObStmtExprGetter getter;
+      getter.set_relation_scope();
+      getter.remove_scope(SCOPE_WHERE);
+      bool need_score = false;
+      if (OB_FAIL(get_stmt()->get_child_stmts(child_stmts))) {
+      } else if (!child_stmts.empty() || 0 != get_stmt()->get_subquery_expr_size()) {
+        // A correlated reference may consume the score outside this query block.
+      } else if (OB_FAIL(get_stmt()->get_relation_exprs(relation_exprs, getter))) {
+      } else {
+        // Collect non-WHERE scopes separately so expression deduplication cannot
+        // hide a shared SELECT/ORDER BY reference to the boolean predicate.
+        for (int64_t i = 0; OB_SUCC(ret) && i < get_stmt()->get_condition_exprs().count(); ++i) {
+          ObRawExpr *condition = get_stmt()->get_condition_exprs().at(i);
+          if (condition != match_pred && OB_FAIL(relation_exprs.push_back(condition))) {
+          }
+        }
+        for (int64_t i = 0; OB_SUCC(ret) && !need_score && i < relation_exprs.count(); ++i) {
+          if (OB_FAIL(ObRawExprUtils::find_expr(relation_exprs.at(i), match_against, need_score))) {
+          }
+        }
+        if (OB_SUCC(ret) && !need_score) {
+          tr_info.need_calc_relevance_ = false;
+          tr_info.pushdown_match_filter_ = nullptr;
+        }
+      }
+    }
     // The mapping table is absent when the data-table rowkey is used as the document ID.
     table_scan->set_doc_id_index_table_id(tr_info.doc_id_idx_tid_);
     if (table_scan->is_vec_adaptive_scan() || table_scan->is_vec_idx_scan_post_filter()) {
       table_scan->set_rowkey_doc_table_id(tr_info.rowkey_idx_tid_);
     }
-    if (OB_FAIL(table_scan->set_is_skip_rowkey_doc(tr_info.doc_id_idx_tid_ == OB_INVALID_ID))) {
+    if (OB_FAIL(ret)) {
+    } else if (OB_FAIL(table_scan->set_is_skip_rowkey_doc(tr_info.doc_id_idx_tid_ == OB_INVALID_ID))) {
     } else if (OB_FAIL(table_scan->set_is_skip_rowkey_doc(tr_info.rowkey_idx_tid_ == OB_INVALID_ID))) {
     }
   }

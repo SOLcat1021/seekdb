@@ -37,6 +37,7 @@ struct ObSRDaaTRelevanceCollector
   virtual void reuse() = 0;
   virtual int collect_one_dim(const int64_t dim_idx, const double relevance) = 0;
   virtual int get_result(double &relevance, bool &is_valid) = 0;
+  virtual bool supports_unscored_union() const { return false; }
 };
 
 struct ObSRDaaTInnerProductRelevanceCollector : ObSRDaaTRelevanceCollector
@@ -48,6 +49,7 @@ struct ObSRDaaTInnerProductRelevanceCollector : ObSRDaaTRelevanceCollector
   virtual ~ObSRDaaTInnerProductRelevanceCollector() {};
 
   int init(int64_t should_match = 0);
+  virtual bool supports_unscored_union() const override { return should_match_ <= 1; }
   virtual void reset() override;
   virtual void reuse() override;
   virtual int collect_one_dim(const int64_t dim_idx, const double) override;

@@ -19,7 +19,7 @@
 
 #include "lib/utility/ob_macro_utils.h"
 #include "lib/utility/ob_print_utils.h"
-#include "share/text_analysis/ob_text_analyzer.h"
+#include "share/text_analysis/ob_token_stream.h"
 #include "data_plane/fts/ob_fts_parser.h"
 
 namespace oceanbase
@@ -35,10 +35,9 @@ public:
 public:
   explicit ObBEngFTParser(common::ObIAllocator &allocator)
     : allocator_(allocator),
-      analysis_ctx_(),
-      english_analyzer_(),
+      cs_(nullptr),
+      tokenizer_(),
       doc_(),
-      token_stream_(nullptr),
       is_inited_(false)
   {}
   ~ObBEngFTParser() { reset(); }
@@ -51,17 +50,12 @@ public:
       int64_t &char_len,
       int64_t &word_freq) override;
 
-  VIRTUAL_TO_STRING_KV(K_(analysis_ctx), K_(english_analyzer), KP_(token_stream), K_(is_inited));
-private:
-  int segment(
-      const common::ObDatum &doc,
-      share::ObITokenStream *&token_stream);
+  VIRTUAL_TO_STRING_KV(KP_(cs), K_(is_inited));
 private:
   common::ObIAllocator &allocator_;
-  share::ObTextAnalysisCtx analysis_ctx_;
-  share::ObEnglishTextAnalyzer english_analyzer_;
+  const ObCharsetInfo *cs_;
+  share::ObTextWhitespaceTokenizer tokenizer_;
   common::ObDatum doc_;
-  share::ObITokenStream *token_stream_;
   bool is_inited_;
 
   DISALLOW_COPY_AND_ASSIGN(ObBEngFTParser);

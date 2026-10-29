@@ -48,15 +48,17 @@ struct ObSRMergeCmp
 private:
   inline const ObDatum &get_id_datum(const int64_t iter_idx)
   {
-    const ObDatum *datum = iter_ids_->at(iter_idx);
+    OB_ASSERT(iter_idx >= 0 && iter_idx < iter_id_count_);
+    const ObDatum *datum = iter_ids_[iter_idx];
     OB_ASSERT(nullptr != datum);
     return *datum;
   }
 private:
   common::ObDatumCmpFuncType cmp_func_;
-  // TODO: if memory lifetime of docid datum is guaranteed by dim_iters, we can use pointer to datum directly
-  //       and avoid deep copy into merge heap here
-  const ObFixedArray<const ObDatum *, ObIAllocator> *iter_ids_;
+  // The fixed array is allocated before init and never resized while the
+  // merge heap is live. Its entries are refreshed by the dimension iterators.
+  const ObDatum *const *iter_ids_;
+  int64_t iter_id_count_;
   bool is_inited_;
 };
 

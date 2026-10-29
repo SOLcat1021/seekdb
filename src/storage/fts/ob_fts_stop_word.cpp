@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <array>
 #include "object/ob_object.h"
 #define USING_LOG_PREFIX STORAGE_FTS
 
@@ -26,6 +28,95 @@ namespace oceanbase
 {
 namespace storage
 {
+
+namespace
+{
+// The hash-set comparison uses utf8mb4_general_ci. Only alphabetic ASCII
+// inputs can bypass it: spaces, punctuation and non-ASCII characters must
+// retain its padding, conversion and Unicode collation semantics.
+struct AsciiStopWords
+{
+  static constexpr size_t COUNT = sizeof(ob_stop_word_list) / sizeof(ob_stop_word_list[0]);
+  std::array<uint64_t, COUNT> keys_{};
+  size_t max_length_ = 0;
+  bool enabled_ = true;
+
+  AsciiStopWords()
+  {
+    for (size_t i = 0; i < COUNT; ++i) {
+      const size_t length = STRLEN(ob_stop_word_list[i]);
+      max_length_ = std::max(max_length_, length);
+      if (0 == length || length > sizeof(uint64_t)) {
+        enabled_ = false;
+      } else {
+        for (size_t j = 0; j < length; ++j) {
+          const unsigned char c = ob_stop_word_list[i][j];
+          if (c < 'a' || c > 'z') {
+            enabled_ = false;
+          }
+          keys_[i] |= static_cast<uint64_t>(c) << (j * 8);
+        }
+      }
+    }
+    std::sort(keys_.begin(), keys_.end());
+  }
+
+  bool check(const ObFTWord &word, bool &is_stopword) const
+  {
+    const ObString &text = word.get_word().get_string();
+    const unsigned char first = static_cast<unsigned char>(text.ptr()[0]);
+    bool handled = enabled_ && ((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z'))
+        && (CS_TYPE_UTF8MB4_GENERAL_CI == word.get_collation_type()
+            || CS_TYPE_UTF8MB4_BIN == word.get_collation_type()
+            || CHARSET_UTF8MB4 == ObCharset::charset_type_by_coll(word.get_collation_type()));
+    uint64_t key = 0;
+    for (int64_t i = 0; handled && i < text.length(); ++i) {
+      unsigned char c = static_cast<unsigned char>(text.ptr()[i]);
+      if (c >= 'A' && c <= 'Z') {
+        c += 'a' - 'A';
+      }
+      if (c < 'a' || c > 'z') {
+        handled = false;
+      } else if (text.length() <= max_length_) {
+        key |= static_cast<uint64_t>(c) << (i * 8);
+      }
+    }
+    if (handled) {
+      is_stopword = text.length() <= max_length_
+          && std::binary_search(keys_.begin(), keys_.end(), key);
+    }
+    return handled;
+  }
+};
+
+const AsciiStopWords ASCII_STOP_WORDS;
+
+// ASCII without capitals and unified CJK ideographs are unchanged by UTF-8
+// lowercasing. Other scripts and malformed sequences retain the charset path.
+bool casefold_stable_utf8(const ObString &text)
+{
+  int64_t i = 0;
+  bool stable = true;
+  while (stable && i < text.length()) {
+    const unsigned char c = static_cast<unsigned char>(text.ptr()[i]);
+    if (c < 0x80) {
+      stable = !(c >= 'A' && c <= 'Z');
+      ++i;
+    } else if (c >= 0xe4 && c <= 0xe9 && text.length() - i >= 3) {
+      const unsigned char b1 = static_cast<unsigned char>(text.ptr()[i + 1]);
+      const unsigned char b2 = static_cast<unsigned char>(text.ptr()[i + 2]);
+      const uint32_t cp = ((c & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f);
+      stable = (b1 & 0xc0) == 0x80 && (b2 & 0xc0) == 0x80
+          && cp >= 0x4e00 && cp <= 0x9fff;
+      i += 3;
+    } else {
+      stable = false;
+    }
+  }
+  return stable;
+}
+
+} // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // class ObStopWordChecker
@@ -74,39 +165,36 @@ void ObStopWordChecker::destroy()
 int ObStopWordChecker::check_stopword(const ObFTWord &word, bool &is_stopword)
 {
   int ret = OB_SUCCESS;
+  const auto lookup = [&](const ObString &text) {
+    ObFTWord converted(text.length(), text.ptr(), stopword_type_);
+    int lookup_ret = stopword_set_.exist_refactored(converted);
+    if (OB_HASH_NOT_EXIST == lookup_ret || OB_HASH_EXIST == lookup_ret) {
+      is_stopword = OB_HASH_EXIST == lookup_ret;
+      lookup_ret = OB_SUCCESS;
+    } else if (OB_SUCCESS == lookup_ret) {
+      lookup_ret = OB_ERR_UNEXPECTED;
+    }
+    return lookup_ret;
+  };
   if (OB_UNLIKELY(!inited_)) {
     ret = OB_NOT_INIT;
   } else if (OB_UNLIKELY(word.empty())) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (word.get_collation_type() == stopword_type_.get_collation_type()) {
-    // The usual UTF8MB4_GENERAL_CI path already has the same collation as
-    // the stopword set. Avoid allocating an arena and converting every token.
-    const common::ObString &word_str = word.get_word().get_string();
-    ObFTWord converted(word_str.length(), word_str.ptr(), stopword_type_);
-    ret = stopword_set_.exist_refactored(converted);
+  } else if (ASCII_STOP_WORDS.check(word, is_stopword)) {
+  } else if (CS_TYPE_UTF8MB4_GENERAL_CI == word.get_collation_type()
+      || CS_TYPE_UTF8MB4_BIN == word.get_collation_type()) {
+    // charset_convert aliases the input for these same-charset conversions.
+    // Keep the stopword collation for lookup, without a temporary allocator.
+    ret = lookup(word.get_word().get_string());
   } else {
     common::ObArenaAllocator allocator(lib::ObMemAttr("ChkStopWord"));
     common::ObString cmp_str;
-    if (OB_FAIL(common::ObCharset::charset_convert(
-                                       allocator,
-                                       word.get_word().get_string(),
-                                       word.get_collation_type(),
-                                       stopword_type_.get_collation_type(),
-                                       cmp_str))) {
+    if (OB_FAIL(common::ObCharset::charset_convert(allocator,
+            word.get_word().get_string(), word.get_collation_type(),
+            stopword_type_.get_collation_type(), cmp_str))) {
     } else {
-      ObFTWord converted(cmp_str.length(), cmp_str.ptr(), stopword_type_);
-      ret = stopword_set_.exist_refactored(converted);
+      ret = lookup(cmp_str);
     }
-  }
-  if (OB_HASH_NOT_EXIST == ret) {
-    is_stopword = false;
-    ret = OB_SUCCESS;
-  } else if (OB_HASH_EXIST == ret) {
-    is_stopword = true;
-    ret = OB_SUCCESS;
-  } else if (OB_SUCC(ret)) {
-    ret = OB_ERR_UNEXPECTED;
-  } else {
   }
   return ret;
 }
@@ -168,12 +256,22 @@ int ObAddWord::casedown_word(const ObFTWord &src, ObFTWord &dst)
     ret = OB_INVALID_ARGUMENT;
   } else if (flag_.casedown()) {
     ObString dst_str;
-    if (OB_FAIL(ObCharset::tolower(
-                    word_meta_.get_collation_type(),
-                    src.get_word().get_string(),
-                    dst_str,
-                    allocator_))) {
-    } else {
+    const ObString &src_str = src.get_word().get_string();
+    const ObCollationType collation = word_meta_.get_collation_type();
+    if ((CS_TYPE_UTF8MB4_GENERAL_CI == collation || CS_TYPE_UTF8MB4_BIN == collation)
+        && casefold_stable_utf8(src_str)) {
+      // Preserve the original owning allocation: parser buffers may be reused.
+      char *copy = static_cast<char *>(allocator_.alloc(src_str.length()));
+      if (OB_ISNULL(copy)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else {
+        MEMCPY(copy, src_str.ptr(), src_str.length());
+        dst_str.assign_ptr(copy, src_str.length());
+      }
+    } else if (OB_FAIL(ObCharset::tolower(word_meta_.get_collation_type(),
+                                         src_str, dst_str, allocator_))) {
+    }
+    if (OB_SUCC(ret)) {
       ObFTWord tmp(dst_str.length(), dst_str.ptr(), word_meta_);
       dst = tmp;
     }
@@ -207,8 +305,12 @@ int ObAddWord::groupby_word(const ObFTWord &word, const int64_t word_freq)
     if (OB_FAIL(word_map_.set_refactored(word, 1/*word count*/))) {
     }
   } else {
-    UpdateWordCount update_word_count(word_freq);
-    if (OB_FAIL(word_map_.set_or_update(word, 1/*initial word count*/, update_word_count))) {
+    // Keep the existing first-occurrence count of one. Subsequent occurrences
+    // add the parser's frequency without a second hash and bucket traversal.
+    auto add_frequency = [word_freq](common::hash::HashMapPair<ObFTWord, int64_t> &entry) {
+      entry.second += word_freq;
+    };
+    if (OB_FAIL(word_map_.set_or_update(word, 1/*word count*/, add_frequency))) {
     }
   }
   return ret;
