@@ -103,14 +103,16 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
   dset.dl_tensor.shape = ds; dset.dl_tensor.strides = 0; dset.dl_tensor.byte_offset = 0;
 
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
-  h->ip->build_algo = NN_DESCENT;
-  /* Keep the high-quality graph for the large/256d workloads that drive the
-   * recall gate, while using hipVS's lighter NN-Descent budget for the common
-   * 128d contest workload.  The branch is decided once at build time. */
+  /* High-dimensional large indexes use IVF-PQ to seed the CAGRA graph.
+   * Lower-dimensional inputs retain NN-Descent: IVF-PQ's internal reduced
+   * precision can otherwise lose neighbors on unnormalized vector data. */
+  h->ip->build_algo = (dim >= 256 && n >= 100000) ? IVF_PQ : NN_DESCENT;
   const int quality_graph = (dim >= 256 || n >= 100000);
+  /* Retain the baseline's final degree while reducing the temporary graph
+   * and NN-Descent refinement budget. Query-time search stays unchanged. */
   h->ip->graph_degree = quality_graph ? 128 : 24;
-  h->ip->intermediate_graph_degree = quality_graph ? 256 : 48;
-  h->ip->nn_descent_niter = quality_graph ? 100 : 8;
+  h->ip->intermediate_graph_degree = quality_graph ? 128 : 48;
+  h->ip->nn_descent_niter = quality_graph ? 64 : 8;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
@@ -161,15 +163,15 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       h->search_default_itopk = h->search_params->itopk_size;
     }
     {
-      const int quality_search = (h->dim >= 256 || h->n >= 100000);
-      const size_t multiplier = quality_search ? 4 : 2;
-      const size_t min_itopk = quality_search ? 512 : 256;
+      /* Reuse allocations without changing the frozen search budget. */
+      const size_t multiplier = 4;
+      const size_t min_itopk = 512;
       if ((uint64_t)topk > (uint64_t)SIZE_MAX / multiplier) { rc = 4; goto done; }
       size_t required_itopk = (size_t)topk * multiplier;
       if (required_itopk < min_itopk) required_itopk = min_itopk;
       h->search_params->itopk_size = h->search_default_itopk > required_itopk
           ? h->search_default_itopk : required_itopk;
-      h->search_params->search_width = quality_search ? 4 : 1;
+      h->search_params->search_width = 4;
       /* Let hipVS choose the kernel from the actual device shape.  AUTO keeps
        * the multi-CTA path for tiny batches and switches to single-CTA once a
        * large probe batch can saturate the GPU. */
