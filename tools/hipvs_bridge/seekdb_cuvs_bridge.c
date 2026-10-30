@@ -11,7 +11,40 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <errno.h>
+#include <limits.h>
+#include <string.h>
 #include <pthread.h>
+
+/* Keep the final graph degree unchanged while reducing the temporary NN-Descent
+ * pool and rounds.  The environment overrides make recall/speed sweeps possible
+ * on the AMD host without rebuilding the bridge. */
+#define SK_DEFAULT_GRAPH_DEGREE 128
+#define SK_DEFAULT_INTERMEDIATE_DEGREE 128
+#define SK_DEFAULT_NN_DESCENT_NITER 64
+
+static int sk_positive_env(const char *name, int fallback)
+{
+  const char *text = getenv(name);
+  if (text == NULL || *text == '\0') return fallback;
+  errno = 0;
+  char *end = NULL;
+  long value = strtol(text, &end, 10);
+  if (errno != 0 || end == text || *end != '\0' || value <= 0 || value > INT_MAX) {
+    return fallback;
+  }
+  return (int)value;
+}
+
+static void sk_apply_build_params(cuvsCagraIndexParams_t params)
+{
+  params->build_algo = NN_DESCENT;
+  params->graph_degree = sk_positive_env("SEEKDB_CUVS_GRAPH_DEGREE", SK_DEFAULT_GRAPH_DEGREE);
+  params->intermediate_graph_degree = sk_positive_env(
+      "SEEKDB_CUVS_INTERMEDIATE_DEGREE", SK_DEFAULT_INTERMEDIATE_DEGREE);
+  params->nn_descent_niter = sk_positive_env(
+      "SEEKDB_CUVS_NN_DESCENT_NITER", SK_DEFAULT_NN_DESCENT_NITER);
+}
 
 typedef struct {
   cuvsResources_t        res;
@@ -100,10 +133,7 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
   dset.dl_tensor.shape = ds; dset.dl_tensor.strides = 0; dset.dl_tensor.byte_offset = 0;
 
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
-  h->ip->build_algo = NN_DESCENT;
-  h->ip->graph_degree = 128;
-  h->ip->intermediate_graph_degree = 256;
-  h->ip->nn_descent_niter = 100;
+  sk_apply_build_params(h->ip);
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
