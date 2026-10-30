@@ -271,11 +271,15 @@ int ObSqlMemoryManager::ObSqlWorkAreaCalcInfo::calculate_global_bound_size(
   int ret = OB_SUCCESS;
   int64_t error_sim = std::abs(OB_E(EventTable::EN_SQL_MEMORY_MRG_OPTION) 0);
   int64_t max_wa_size = wa_max_memory_size;
-  // int64_t max_wa_size = wa_max_memory_size;
-  // Historical maximum proportion baseline was 6.25%.
-  // Here changed to set according to 8 concurrent requests
-  int64_t max_bound_size = (0 == error_sim) ? (max_wa_size >> 3) : error_sim;
+  // The interval model below still budgets all registered work areas against
+  // the same aggregate limit. Avoid reserving eight equal shares when only a
+  // few work areas remain active: that can force a nearly complete sort to
+  // spill while most of the work-area budget is idle. Keep at least four
+  // shares of headroom, and reduce the per-area cap as concurrency increases.
+  // Manual work areas and error-injection bounds retain their existing policy.
   profile_cnt_ = profile_cnt;
+  const int64_t concurrent_shares = std::max(static_cast<int64_t>(4), profile_cnt_);
+  int64_t max_bound_size = (0 == error_sim) ? max_wa_size / concurrent_shares : error_sim;
   int64_t avg_bound_size = (0 == profile_cnt_) ? max_bound_size : max_wa_size / profile_cnt_;
   int64_t best_interval_idx = -1;
   if (OB_FAIL(find_best_interval_index_by_mem_target(

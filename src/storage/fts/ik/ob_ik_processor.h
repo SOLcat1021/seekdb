@@ -40,7 +40,6 @@ public:
 
   int init();
   int reset_resource();
-  int reset_input(const char *fulltext, int64_t fulltext_len, bool is_smart);
 
   int get_next_token(const char *&word, int64_t &word_len, int64_t &offset, int64_t &char_cnt);
 
@@ -48,9 +47,6 @@ public:
 
   int current_char(const char *&ch, uint8_t &char_len);
   int current_char_type(ObFTCharUtil::CharType &type);
-  int check_cn_number(bool &is_cn_number) const;
-  int check_num_connector(bool &is_connector) const;
-  int check_letter_connector(bool &is_connector) const;
 
   int step_next();
 
@@ -87,8 +83,6 @@ private:
   int64_t cursor_;
   int64_t next_char_len_;
   ObFTCharUtil::CharType next_char_type_;
-  ob_wc_t next_unicode_;
-  ObCharsetType charset_type_;
 
   uint32_t handle_size_;
   bool is_smart_;
@@ -114,8 +108,6 @@ public:
                          const uint8_t char_len,
                          const ObFTCharUtil::CharType type)
       = 0;
-
-  virtual void reset_state() {}
 };
 
 } // namespace storage

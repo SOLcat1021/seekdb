@@ -1,0 +1,50 @@
+# COUNT(*) observes cardinality, other consumers must preserve the limited subset.
+SET NAMES utf8mb4;
+--disable_warnings
+DROP TABLE IF EXISTS count_limit_values;
+--enable_warnings
+CREATE TABLE count_limit_values(id INT PRIMARY KEY,k INT);
+INSERT INTO count_limit_values VALUES(1,8),(2,NULL),(3,2),(4,8),(5,NULL),(6,1),(7,5),(8,3);
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 0 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 1 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 20 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3 OFFSET 2) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3 OFFSET 50) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 0 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 1 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 3 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 20 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 3 OFFSET 2) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 3 OFFSET 50) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 0 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 1 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 3 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 20 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 3 OFFSET 2) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 3 OFFSET 50) q;
+SELECT COUNT(k) FROM (SELECT k FROM count_limit_values ORDER BY id LIMIT 3) q;
+SELECT COUNT(DISTINCT k) FROM (SELECT k FROM count_limit_values ORDER BY id LIMIT 3) q;
+SELECT SUM(k),MIN(k),MAX(k) FROM (SELECT k FROM count_limit_values ORDER BY id DESC LIMIT 3) q;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id LIMIT 3) q WHERE k IS NULL;
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id LIMIT 3) q JOIN count_limit_values v ON q.k=v.k;
+SELECT k,COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3) q GROUP BY k ORDER BY k;
+SELECT COUNT(*) FROM (SELECT DISTINCT k FROM count_limit_values ORDER BY k LIMIT 3) q;
+SELECT COUNT(*) FROM (SELECT k,COUNT(*) c FROM count_limit_values GROUP BY k HAVING COUNT(*)>1 ORDER BY k LIMIT 1) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_values ORDER BY RAND(42) LIMIT 3) q;
+SELECT id FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3) q ORDER BY id;
+--error ER_SUBQUERY_NO_1_ROW
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_values ORDER BY (SELECT k FROM count_limit_values) LIMIT 3) q;
+--error ER_INVALID_JSON_PATH
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_values ORDER BY JSON_EXTRACT(CONCAT('{"x":',id,'}'),'$[') LIMIT 3) q;
+PREPARE count_limited FROM 'SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT ? OFFSET ?) q';
+SET @lim=0,@off=0;
+EXECUTE count_limited USING @lim,@off;
+SET @lim=3,@off=2;
+EXECUTE count_limited USING @lim,@off;
+SET @lim=20,@off=0;
+EXECUTE count_limited USING @lim,@off;
+SET @lim=3,@off=50;
+EXECUTE count_limited USING @lim,@off;
+DEALLOCATE PREPARE count_limited;
+DROP TABLE count_limit_values;

@@ -35,23 +35,26 @@ namespace
 {
 constexpr size_t BMP_CODE_COUNT = 65536;
 
+// Decode only canonical UTF-8 encodings of one BMP scalar. The mapping is
+// injective on these byte strings; all other keys retain the exact-byte map.
 bool bmp_codepoint(const ObString &word, uint32_t &value)
 {
   bool valid = false;
-  if (nullptr != word.ptr()) {
-    const unsigned char *p = reinterpret_cast<const unsigned char *>(word.ptr());
-    if (word.length() == 1 && p[0] < 0x80) {
-      value = p[0];
-      valid = true;
-    } else if (word.length() == 2 && p[0] >= 0xc2 && p[0] <= 0xdf
-               && (p[1] & 0xc0) == 0x80) {
-      value = ((p[0] & 0x1f) << 6) | (p[1] & 0x3f);
-      valid = true;
-    } else if (word.length() == 3 && p[0] >= 0xe0 && p[0] <= 0xef
-               && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80) {
-      value = ((p[0] & 0x0f) << 12) | ((p[1] & 0x3f) << 6) | (p[2] & 0x3f);
-      valid = value >= 0x800 && (value < 0xd800 || value > 0xdfff);
-    }
+  if (nullptr == word.ptr()) {
+    return false;
+  }
+  const unsigned char *p = reinterpret_cast<const unsigned char *>(word.ptr());
+  if (word.length() == 1 && p[0] < 0x80) {
+    value = p[0];
+    valid = true;
+  } else if (word.length() == 2 && p[0] >= 0xc2 && p[0] <= 0xdf
+             && (p[1] & 0xc0) == 0x80) {
+    value = ((p[0] & 0x1f) << 6) | (p[1] & 0x3f);
+    valid = true;
+  } else if (word.length() == 3 && p[0] >= 0xe0 && p[0] <= 0xef
+             && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80) {
+    value = ((p[0] & 0x0f) << 12) | ((p[1] & 0x3f) << 6) | (p[2] & 0x3f);
+    valid = value >= 0x800 && (value < 0xd800 || value > 0xdfff);
   }
   return valid;
 }
@@ -68,6 +71,7 @@ int ObFTDATBuilder<DATA_TYPE>::init(ObFTTrie<DATA_TYPE> &trie)
     size_t array_size = trie.node_num() * 6; // by experience.
     size_t base_size = array_size * sizeof(int32_t);
     size_t check_size = base_size;
+    // Avoid a 256 KiB side table for small dictionaries such as quantifiers.
     const size_t bmp_size = trie.node_num() >= 4096 ? BMP_CODE_COUNT * sizeof(ObFTWordCode) : 0;
     size_t total_size = sizeof(ObFTDAT) + map_size + bmp_size + base_size + check_size;
 
@@ -309,7 +313,7 @@ int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
       code_cached_ = true;
     }
   }
-  if (OB_FAIL(ret) && OB_ENTRY_NOT_EXIST != ret) {
+  if (OB_SUCCESS != ret && OB_ENTRY_NOT_EXIST != ret) {
   } else if (OB_ENTRY_NOT_EXIST == ret) {
     ret = OB_SUCCESS;
     hit.set_unmatch();

@@ -18,6 +18,7 @@
 
 #include "lib/alloc/alloc_struct.h"
 #include "lib/allocator/page_arena.h"
+#include "lib/charset/ob_charset.h"
 #include "common/json_type/ob_json_base.h"
 #include "common/json_type/ob_json_tree.h"
 #include "lib/ob_errno.h"
@@ -25,8 +26,10 @@
 #include "lib/string/ob_string.h"
 #include "lib/utility/ob_macro_utils.h"
 #include "object/ob_object.h"
+#include "sql/resolver/ddl/ob_fts_index_builder_util.h"
 #include "share/ob_json_access_utils.h"
 #include "data_plane/fts/ob_fts_parser_helper.h"
+#include "data_plane/fts/dict/ob_gen_dic_loader.h"
 #include "data_plane/fts/ob_fts_parser_property.h"
 
 #define USING_LOG_PREFIX SQL_ENG
@@ -55,7 +58,7 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
   common::ObArenaAllocator &temp_allocator = tmp_alloc_g.get_allocator();
 
   ObIJsonBase *json_result = nullptr;
-  TokenizeParam param;
+  TokenizeParam param(temp_allocator);
 
   // check param num, which is checked in ObExprOperator::calc_result_typeN.
   if (OB_UNLIKELY(expr.arg_cnt_ < 1 || expr.arg_cnt_ > 3)) {
@@ -79,47 +82,35 @@ int ObExprTokenize::tokenize_fulltext(const TokenizeParam &param,
 {
   int ret = OB_SUCCESS;
   storage::ObFTParseHelper tokenize_helper;
-  static thread_local storage::ObFTParseHelper beng_helper;
-  static thread_local bool beng_helper_inited = false;
   const int64_t ft_word_bkt_cnt = MIN(MAX(param.fulltext_.length() / 2, 2), 997);
   int64_t doc_len = 0;
-  static thread_local storage::ObFTWordMap token_map;
-  const bool default_beng = 0 == param.parser_name_.case_compare("beng.1")
-                            && param.properties_.empty();
+  storage::ObFTWordMap token_map;
 
   if (TokenizeParam::OUTPUT_MODE::DEFAULT != mode && TokenizeParam::OUTPUT_MODE::ALL != mode) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (default_beng && !beng_helper_inited
-             && OB_FAIL(beng_helper.init(&allocator, param.parser_name_, param.properties_))) {
-  } else if (default_beng && !beng_helper_inited) {
-    beng_helper_inited = true;
-  } else if (default_beng && OB_FAIL(beng_helper.bind_allocator(&allocator))) {
-  } else if (!default_beng && OB_FAIL(tokenize_helper.init(&allocator, param.parser_name_, param.properties_))) {
-  } else if (!token_map.created() && OB_FAIL(token_map.create(ft_word_bkt_cnt, common::ObMemAttr("FTWordMap")))) {
-  } else if (token_map.created() && token_map.bucket_count() < ft_word_bkt_cnt
-             && (OB_FAIL(token_map.destroy()) || OB_FAIL(token_map.create(ft_word_bkt_cnt,
-                                                                           common::ObMemAttr("FTWordMap"))))) {
-  } else if (OB_FAIL(token_map.reuse())) {
+  } else if (OB_FAIL((param.use_default_properties_
+      ? tokenize_helper.init(&allocator, param.parser_name_, param.default_properties_)
+      : tokenize_helper.init(&allocator, param.parser_name_, param.properties_)))) {
+  } else if (OB_FAIL(token_map.create(ft_word_bkt_cnt, common::ObMemAttr("FTWordMap")))) {
   } else if (
       (0 != param.fulltext_.length())
-      && OB_FAIL((default_beng ? beng_helper : tokenize_helper).segment(
+      && OB_FAIL(tokenize_helper.segment(
                      param.meta_,
                      param.fulltext_.ptr(),
                      param.fulltext_.length(),
                      doc_len,
-                     token_map,
-                     &allocator))) {
+                     token_map))) {
   } else {
     switch (param.output_mode_) {
     case TokenizeParam::OUTPUT_MODE::DEFAULT: {
-      if (OB_FAIL((default_beng ? beng_helper : tokenize_helper).make_token_array_json(token_map, result))) {
+      if (OB_FAIL(tokenize_helper.make_token_array_json(token_map, result))) {
       } else {
         // pass
       }
       break;
     }
     case TokenizeParam::OUTPUT_MODE::ALL: {
-      if (OB_FAIL((default_beng ? beng_helper : tokenize_helper).make_detail_json(token_map, doc_len, result))) {
+      if (OB_FAIL(tokenize_helper.make_detail_json(token_map, doc_len, result))) {
       } else {
         // pass
       }
@@ -132,9 +123,10 @@ int ObExprTokenize::tokenize_fulltext(const TokenizeParam &param,
   return ret;
 }
 
-ObExprTokenize::TokenizeParam ::TokenizeParam()
-  : allocator_(ObMemAttr("TokenizeParam")),
+ObExprTokenize::TokenizeParam::TokenizeParam(common::ObIAllocator &allocator)
+  : allocator_(allocator),
     parser_name_(ObString(OB_DEFAULT_FULLTEXT_PARSER_NAME)),
+    use_default_properties_(false),
     meta_(),
     fulltext_(),
     output_mode_(OUTPUT_MODE::DEFAULT)
@@ -211,13 +203,10 @@ int ObExprTokenize::parse_param(const ObExpr &expr,
 
   ObDatum *parser_params_datum;
   ObString raw_parser_name = ObString::make_string(OB_DEFAULT_FULLTEXT_PARSER_NAME);
-  // eval_tokenize() already owns the per-expression temporary arena and keeps
-  // it alive through parsing, tokenization and JSON packing.  Re-entering a
-  // TempAllocGuard here creates a second arena for every short TOKENIZE call,
-  // even though all parser argument evaluation can use the caller's arena.
-  // Keep one lifecycle for the whole expression and preserve the existing
-  // allocator ownership of parser properties.
-  MultimodeAlloctor temp_allocator(allocator);
+
+  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+
+  MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator());
 
   if (OB_UNLIKELY(expr.arg_cnt_ < 1 || expr.arg_cnt_ > 3)) {
     ret = OB_INVALID_ARGUMENT;
@@ -345,21 +334,6 @@ int ObExprTokenize::parse_parser_name(const ObExpr &expr, ObEvalCtx &ctx, Tokeni
 
   if (OB_FAIL(ret)) {
     // already logged
-  // The benchmark and the index DDLs use the five built-in names without a
-  // version suffix.  Their canonical form is fixed at version 1, so avoid a
-  // temporary parser object, a stack copy and an arena allocation on every
-  // TOKENIZE invocation.  Keep the general path for versioned/invalid names;
-  // it remains responsible for validation and error reporting.
-  } else if (0 == raw_parser_name.case_compare("space")) {
-    param.parser_name_ = ObString::make_string("space.1");
-  } else if (0 == raw_parser_name.case_compare("ngram")) {
-    param.parser_name_ = ObString::make_string("ngram.1");
-  } else if (0 == raw_parser_name.case_compare("beng")) {
-    param.parser_name_ = ObString::make_string("beng.1");
-  } else if (0 == raw_parser_name.case_compare("ik")) {
-    param.parser_name_ = ObString::make_string("ik.1");
-  } else if (0 == raw_parser_name.case_compare("ngram2")) {
-    param.parser_name_ = ObString::make_string("ngram2.1");
   } else if (OB_FAIL(construct_ft_parser_inner_name(raw_parser_name, param))) {
   }
 
@@ -402,25 +376,28 @@ int ObExprTokenize::parse_parser_properties(const ObExpr &expr,
 int ObExprTokenize::TokenizeParam::reform_parser_properties(const ObString &properties)
 {
   int ret = OB_SUCCESS;
+  // No parser options means the canonical built-in defaults. Construct them
+  // for this call without a JSON allocation/serialization/reparse round trip.
+  // Explicit options retain the complete existing validation and text path.
+  if (properties.empty()) {
+    storage::ObFTParser parser;
+    if (OB_FAIL(parser.parse_from_str(parser_name_.ptr(), parser_name_.length()))) {
+      return ret;
+    } else if (parser.is_ik() || parser.is_space() || parser.is_ngram()
+               || parser.is_beng() || parser.is_ngram2()) {
+      default_properties_ = storage::ObFTParserProperty();
+      if (parser.is_ik()) {
+        default_properties_.dict_table_ = ObString(storage::ObFTSLiteral::CONFIG_NAME_DICT_TABLE);
+        default_properties_.stopword_table_ = ObString(storage::ObFTSLiteral::CONFIG_NAME_STOPWORD_TABLE);
+        default_properties_.quantifier_table_ = ObString(storage::ObFTSLiteral::CONFIG_NAME_QUANTIFIER_TABLE);
+      }
+      use_default_properties_ = true;
+      return ret;
+    }
+  }
   storage::ObFTParserJsonProps parser_properties;
-  storage::ObFTParser parser;
 
-  // BENG's helper supplies its defaults when the additional-args array is
-  // empty, so that one parser can safely bypass JSON materialization.  IK and
-  // the other parsers still need rebuild_props_for_ddl() to materialize their
-  // default table/mode settings; passing an empty object through for them
-  // makes the parser look up missing keys and returns OB_SEARCH_NOT_FOUND.
-  // parse_parser_name() canonicalizes the built-in shorthand to beng.1.  The
-  // common empty-properties BENG call can therefore bypass parser decoding as
-  // well as JSON materialization; versioned/other parser names retain the
-  // parser object path and its validation.
-  if (properties.empty() && 0 == parser_name_.case_compare("beng.1")) {
-    properties_ = properties;
-  } else if (properties.empty()
-             && OB_FAIL(parser.parse_from_str(parser_name_.ptr(), parser_name_.length()))) {
-  } else if (properties.empty() && parser.is_beng()) {
-    properties_ = properties;
-  } else if (OB_FAIL(parser_properties.init())) {
+  if (OB_FAIL(parser_properties.init())) {
   } else if (OB_FAIL(parser_properties.parse_from_valid_str(properties))) {
     LOG_USER_ERROR(OB_INVALID_ARGUMENT, "parser properties invalid.");
   } else if (OB_FAIL(parser_properties.rebuild_props_for_ddl(parser_name_,
@@ -434,13 +411,22 @@ int ObExprTokenize::TokenizeParam::reform_parser_properties(const ObString &prop
 
 int ObExprTokenize::TokenizeParam::try_load_dictionary_for_ik()
 {
-  // TOKENIZE uses the process-global ObFTDictHub owned by ObFTParseData.  The
-  // generic ObGenDicLoader probe below never loads data in this build
-  // (check_need_load_dic() is always false), but still computes a cache key,
-  // takes the loader-map lock and adjusts a reference count for every call.
-  // DDL keeps the real loader/lock path; TOKENIZE only needs the already
-  // initialized parser hub.
-  return OB_SUCCESS;
+  int ret = OB_SUCCESS;
+  bool need_to_load_dic = false;
+  storage::ObDicLoaderHandle dic_loader_handle;
+  if (OB_FAIL(share::ObFtsIndexBuilderUtil::check_need_to_load_dic(
+          parser_name_, need_to_load_dic))) {
+  } else if (need_to_load_dic) {
+    if (OB_FAIL(storage::ObGenDicLoader::get_instance().get_dic_loader(
+                    ObString::make_string(storage::ObFTSLiteral::PARSER_NAME_IK), // currently only ik, use parser_name_ without version suffix
+                    ObCharset::charset_type_by_coll(meta_.get_collation_type()),
+                    dic_loader_handle))) {
+    } else if (OB_UNLIKELY(!dic_loader_handle.is_valid())) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(dic_loader_handle.get_loader()->try_load_dictionary_in_trans())) {
+    }
+  }
+  return ret;
 }
 
 } // namespace sql

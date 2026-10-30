@@ -1,0 +1,108 @@
+tokens
+{"tokens": [{"école": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"ecole": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"café": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"résumé": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"resume": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"école": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"ecole": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"café": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"résumé": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"resume": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"école": 1}, {"ecole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"école": 1}, {"ecole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"café": 1}, {"cafe": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"café": 1}, {"cafe": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"résumé": 1}, {"resume": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"résumé": 1}, {"resume": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"école": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"ecole": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"café": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"résumé": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"resume": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"école": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"ecole": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"café": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"résumé": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"resume": 2}], "doc_len": 2}
+tokens
+{"tokens": [{"école": 1}, {"ecole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"école": 1}, {"ecole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"café": 1}, {"cafe": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"café": 1}, {"cafe": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"résumé": 1}, {"resume": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"résumé": 1}, {"resume": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"ecole": 1}, {"cole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"ecole": 1}, {"cole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 1}, {"caf": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 1}, {"caf": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"sum": 1}, {"r": 1}, {"resume": 1}], "doc_len": 3}
+tokens
+{"tokens": [{"sum": 1}, {"r": 1}, {"resume": 1}], "doc_len": 3}
+tokens
+{"tokens": [{"cole": 1}, {"ecole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"cole": 1}, {"ecole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 1}, {"caf": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 1}, {"caf": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"sum": 1}, {"resume": 1}, {"r": 1}], "doc_len": 3}
+tokens
+{"tokens": [{"sum": 1}, {"resume": 1}, {"r": 1}], "doc_len": 3}
+tokens
+{"tokens": [{"ecole": 1}, {"cole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"ecole": 1}, {"cole": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 1}, {"caf": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"cafe": 1}, {"caf": 1}], "doc_len": 2}
+tokens
+{"tokens": [{"r": 1}, {"sum": 1}, {"resume": 1}], "doc_len": 3}
+tokens
+{"tokens": [{"r": 1}, {"sum": 1}, {"resume": 1}], "doc_len": 3}

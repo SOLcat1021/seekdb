@@ -15,6 +15,7 @@
  */
 
 #define USING_LOG_PREFIX SQL_REWRITE
+#include "sql/rewrite/ob_transform_simplify_orderby.h"
 #include "sql/rewrite/ob_transform_pre_process.h"
 #include "sql/optimizer/ob_optimizer_util.h"
 #include "sql/engine/expr/ob_expr_arg_case.h"
@@ -178,27 +179,21 @@ int ObTransformPreProcess::transform_one_stmt(common::ObIArray<ObParentDMLStmt> 
       }
     }
     if (OB_SUCC(ret)) {
-      // A scalar COUNT(*) over a limited derived table only needs its row
-      // count; the implicit relevance order cannot change that count.
-      bool count_only_derived = false;
-      if (stmt->is_select_stmt() && static_cast<ObSelectStmt *>(stmt)->has_limit() &&
-          parent_stmts.count() == 1 && nullptr != parent_stmts.at(0).stmt_ &&
-          parent_stmts.at(0).stmt_->is_select_stmt()) {
-        const ObSelectStmt *outer = static_cast<const ObSelectStmt *>(parent_stmts.at(0).stmt_);
-        const TableItem *derived = outer->get_table_items().count() == 1 ? outer->get_table_item(0) : nullptr;
-        const ObRawExpr *outer_expr = outer->get_select_item_size() == 1 ? outer->get_select_item(0).expr_ : nullptr;
-        const ObSelectStmt *inner = static_cast<const ObSelectStmt *>(stmt);
-        count_only_derived = nullptr != derived && derived->is_generated_table() && derived->ref_query_ == stmt &&
-                             outer->is_scala_group_by() && outer->get_condition_exprs().empty() &&
-                             outer->get_having_exprs().empty() && !outer->has_order_by() &&
-                             outer->get_aggr_item_size() == 1 && !inner->is_fetch_with_ties() &&
-                             nullptr != outer_expr && outer_expr->get_expr_type() == T_FUN_COUNT &&
-                             outer_expr->get_param_count() == 0 && inner->get_select_item_size() == 1 &&
-                             nullptr != inner->get_select_item(0).expr_ &&
-                             inner->get_select_item(0).expr_->is_column_ref_expr();
-      }
-      if (stmt->get_match_exprs().count() > 0 && !count_only_derived &&
+      if (stmt->get_match_exprs().count() > 0 &&
           OB_FAIL(preserve_order_for_fulltext_search(stmt, is_happened))) {
+      } else {
+        trans_happened |= is_happened;
+      }
+    }
+    // Fulltext queries disable the general rewrite rule set. Apply only the
+    // cardinality-only COUNT view rule after child default orders are known.
+    if (OB_SUCC(ret) && stmt->is_select_stmt() && 1 == stmt->get_table_items().count()
+        && nullptr != stmt->get_table_item(0) && stmt->get_table_item(0)->is_generated_table()) {
+      ObTransformSimplifyOrderby simplify(ctx_);
+      bool force_serial_set_order = false;
+      if (OB_FAIL(ctx_->session_info_->is_serial_set_order_forced(force_serial_set_order))) {
+      } else if (OB_FAIL(simplify.remove_order_by_for_view_stmt(
+                     stmt, is_happened, force_serial_set_order, true/*count_limited_only*/))) {
       } else {
         trans_happened |= is_happened;
       }

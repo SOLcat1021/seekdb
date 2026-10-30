@@ -66,8 +66,7 @@ int ObTextTokenizer::open(const ObDatum &document, const ObCharsetInfo *cs)
 ObTextWhitespaceTokenizer::ObTextWhitespaceTokenizer()
   : ObTextTokenizer(),
     curr_token_ptr_(nullptr),
-    trav_pos_(0),
-    fast_ascii_(false)
+    trav_pos_(0)
 {
 }
 
@@ -75,7 +74,6 @@ void ObTextWhitespaceTokenizer::reset()
 {
   curr_token_ptr_ = nullptr;
   trav_pos_ = 0;
-  fast_ascii_ = false;
   ObTextTokenizer::reset();
 }
 
@@ -84,8 +82,6 @@ int ObTextWhitespaceTokenizer::inner_open(const ObDatum &document, const ObChars
   int ret = OB_SUCCESS;
   curr_token_ptr_ = nullptr;
   trav_pos_ = 0;
-  fast_ascii_ = nullptr != cs && nullptr != cs->csname
-                && CHARSET_UTF8MB4 == ObCharset::charset_type(cs->csname);
   return ret;
 }
 
@@ -102,11 +98,12 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
     int64_t token_len = 0;
     // to next non-whitespace pos
     while (OB_SUCC(ret) && found_delimiter()) {
-      const unsigned char ch = static_cast<unsigned char>(doc[trav_pos_]);
-      int64_t c_len = 1;
-      if (!fast_ascii_ || ch >= 0x80) {
-        c_len = ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
-      }
+      // ASCII bytes are single-byte characters in UTF-8. Keep the charset
+      // decoder for all other bytes and charsets, including malformed input.
+      const unsigned char c = static_cast<unsigned char>(doc[trav_pos_]);
+      const int64_t c_len = (c < 0x80 && (cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI
+                                         || cs_->number == CS_TYPE_UTF8MB4_BIN))
+          ? 1 : ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
       trav_pos_ += c_len;
       if (trav_pos_ >= doc_len || 0 == c_len) {// if char is invalid, just skip the rest of document
         iter_end_ = true;
@@ -120,11 +117,12 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
 
     // to next whitespace pos
     while (OB_SUCC(ret) && !found_delimiter()) {
-      const unsigned char ch = static_cast<unsigned char>(doc[trav_pos_]);
-      int64_t c_len = 1;
-      if (!fast_ascii_ || ch >= 0x80) {
-        c_len = ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
-      }
+      // ASCII bytes are single-byte characters in UTF-8. Keep the charset
+      // decoder for all other bytes and charsets, including malformed input.
+      const unsigned char c = static_cast<unsigned char>(doc[trav_pos_]);
+      const int64_t c_len = (c < 0x80 && (cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI
+                                         || cs_->number == CS_TYPE_UTF8MB4_BIN))
+          ? 1 : ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
       trav_pos_ += c_len;
       token_len += c_len;
       if (trav_pos_ >= doc_len || 0 == c_len) {
@@ -148,10 +146,10 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
 
 bool ObTextWhitespaceTokenizer::found_delimiter()
 {
-  const unsigned char ch = static_cast<unsigned char>(input_doc_->ptr_[trav_pos_]);
-  // All three ob_is* helpers read the same charset flag byte.
-  return nullptr != cs_->ctype
-         && 0 != ((cs_->ctype + 1)[ch] & (_MY_SPC | _MY_CTR | _MY_PNT));
+  bool found = false;
+  const char *curr_char = input_doc_->ptr_ + trav_pos_;
+  found = ob_isspace(cs_, *curr_char) || ob_iscntrl(cs_, *curr_char) || ob_ispunct(cs_, *curr_char);
+  return found;
 }
 
 ObTokenNormalizer::ObTokenNormalizer()
@@ -232,23 +230,13 @@ int ObTokenStopWordNormalizer::filter_special_marks(const ObDatum &check_token, 
 
 ObBasicEnglishNormalizer::ObBasicEnglishNormalizer()
   : ObTokenNormalizer(),
-    norm_allocator_("TxtTokGrpFilter", OB_MALLOC_NORMAL_BLOCK_SIZE),
-    skip_unchanged_ascii_(false)
+    norm_allocator_("TxtTokGrpFilter", OB_MALLOC_NORMAL_BLOCK_SIZE)
 {
-}
-
-int ObBasicEnglishNormalizer::inner_init(const ObCharsetInfo *cs, ObITokenStream &in_stream)
-{
-  UNUSED(in_stream);
-  skip_unchanged_ascii_ = nullptr != cs && nullptr != cs->csname
-                          && CHARSET_UTF8MB4 == ObCharset::charset_type(cs->csname);
-  return OB_SUCCESS;
 }
 
 void ObBasicEnglishNormalizer::reset()
 {
   norm_allocator_.reset();
-  skip_unchanged_ascii_ = false;
   ObTokenNormalizer::reset();
 }
 
@@ -316,20 +304,10 @@ int ObBasicEnglishNormalizer::get_next(ObDatum &next_token, int64_t &token_freq)
       ret = OB_ERR_UNEXPECTED;
     } else {
       ObString norm_alnum_token(norm_token_len, norm_token_ptr);
-      bool unchanged_ascii = skip_unchanged_ascii_;
-      for (uint32_t i = 0; unchanged_ascii && i < norm_token_len; ++i) {
-        const unsigned char ch = static_cast<unsigned char>(norm_token_ptr[i]);
-        unchanged_ascii = ch < 0x80 && !('A' <= ch && ch <= 'Z');
-      }
-      if (unchanged_ascii) {
-        // The input document remains alive until the consumer advances the stream.
-        next_token.set_string(norm_alnum_token);
+      ObString norm_lower_token;
+      if (OB_FAIL(ObCharset::tolower(cs_, norm_alnum_token, norm_lower_token, norm_allocator_))) {
       } else {
-        ObString norm_lower_token;
-        if (OB_FAIL(ObCharset::tolower(cs_, norm_alnum_token, norm_lower_token, norm_allocator_))) {
-        } else {
-          next_token.set_string(norm_lower_token);
-        }
+        next_token.set_string(norm_lower_token);
       }
     }
   }

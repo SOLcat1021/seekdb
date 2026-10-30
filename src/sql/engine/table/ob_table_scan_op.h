@@ -419,7 +419,7 @@ public:
       uint64_t reserved_                        : 52;
     };
   };
-  int64_t id_col_idx_;
+  int64_t id_col_idx_; // FTS DDL: schema-bound document identifier in output_.
   int64_t partition_id_calc_type_;
 
   common::ObString parser_name_; // word segment for ddl.
@@ -702,6 +702,7 @@ private:
   int inner_rescan_for_tsc();
 
   int inner_get_next_fts_index_row();
+  int inner_get_next_fts_index_batch(const int64_t max_row_cnt);
   int fetch_next_fts_index_rows();
   int fill_generated_fts_cols(blocksstable::ObDatumRow *row);
   int get_output_fts_col_expr_by_type(const ObExprOperatorType &type, ObExpr *&expr);

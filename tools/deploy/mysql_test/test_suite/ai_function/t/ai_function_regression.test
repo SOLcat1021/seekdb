@@ -1,0 +1,5 @@
+# owner: database-competition
+# Protocol, batch mapping, NULL/skip/LIMIT, malformed response and stable rerank coverage.
+# Run on the same local host as the isolated observer. Port 8000 must be free.
+--exec python3 mysql_test/test_suite/ai_function/include/run-ai-function-regression.py --host $OBMYSQL_MS0 --port $OBMYSQL_PORT
+--echo # AI function protocol and batch regression passed

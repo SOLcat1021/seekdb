@@ -380,9 +380,8 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
 
 namespace
 {
-// The dictionary cache uses UTF8MB4_BIN ranges. Compare the bytes first and
-// then the lengths, matching the non-padding binary collation used by the
-// existing linear path.
+// UTF8MB4_BIN's non-padding strnncoll compares bytes and then lengths.
+// Range boundaries use exactly that collation, independent of the document.
 int compare_range_key(const ObString &left, const ObString &right)
 {
   const int64_t len = MIN(left.length(), right.length());
@@ -394,28 +393,8 @@ int compare_range_key(const ObString &left, const ObString &right)
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
-  if (fast_range_lookup_ && 3 == single_word.length()) {
-    const unsigned char *bytes = reinterpret_cast<const unsigned char *>(single_word.ptr());
-    const uint32_t key = (static_cast<uint32_t>(bytes[0]) << 16)
-                       | (static_cast<uint32_t>(bytes[1]) << 8) | bytes[2];
-    int64_t left = 0;
-    int64_t right = range_dicts_.size();
-    while (left < right) {
-      const int64_t mid = left + (right - left) / 2;
-      if (range_dicts_[mid].end_key_ < key) {
-        left = mid + 1;
-      } else {
-        right = mid;
-      }
-    }
-    if (left < range_dicts_.size() && range_dicts_[left].start_key_ <= key) {
-      dict = range_dicts_[left].dict_;
-    } else {
-      ret = OB_ENTRY_NOT_EXIST;
-    }
-    return ret;
-  }
-  if (ordered_range_lookup_ && !single_word.empty()) {
+  bool found = false;
+  if (ordered_ranges_ && !single_word.empty()) {
     int64_t begin = 0;
     int64_t end = range_dicts_.size();
     while (begin < end) {
@@ -429,23 +408,21 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
     if (begin < range_dicts_.size()
         && compare_range_key(range_dicts_[begin].start_.get_word(), single_word) <= 0) {
       dict = range_dicts_[begin].dict_;
-      return ret;
-    } else {
-      return OB_ENTRY_NOT_EXIST;
-    }
-  }
-  bool found = false;
-  for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
-    if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                          range_dicts_[i].start_.get_word(),
-                          single_word)
-            <= 0
-        && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                             range_dicts_[i].end_.get_word(),
-                             single_word)
-               >= 0) {
-      dict = range_dicts_[i].dict_;
       found = true;
+    }
+  } else {
+    for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
+      if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                            range_dicts_[i].start_.get_word(),
+                            single_word)
+              <= 0
+          && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                               range_dicts_[i].end_.get_word(),
+                               single_word)
+                 >= 0) {
+        dict = range_dicts_[i].dict_;
+        found = true;
+      }
     }
   }
   if (!found) {
@@ -458,7 +435,6 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
 int ObFTRangeDict::build_dict_from_cache(const ObFTCacheRangeContainer &range_container)
 {
   int ret = OB_SUCCESS;
-  ordered_range_lookup_ = desc_.coll_type_ == ObCollationType::CS_TYPE_UTF8MB4_BIN;
   for (ObList<ObFTCacheRangeHandle *, ObIAllocator>::const_iterator iter = range_container.get_handles().begin();
        OB_SUCC(ret) && iter != range_container.get_handles().end();
        iter++) {
@@ -472,36 +448,16 @@ int ObFTRangeDict::build_dict_from_cache(const ObFTCacheRangeContainer &range_co
       range.start_ = dat->start_word_;
       range.end_ = dat->end_word_;
       range.dict_ = dict;
-      range.start_key_ = 0;
-      range.end_key_ = 0;
-      if (3 == range.start_.word_len && 3 == range.end_.word_len) {
-        const unsigned char *start = reinterpret_cast<const unsigned char *>(range.start_.word);
-        const unsigned char *end = reinterpret_cast<const unsigned char *>(range.end_.word);
-        range.start_key_ = (static_cast<uint32_t>(start[0]) << 16)
-                           | (static_cast<uint32_t>(start[1]) << 8) | start[2];
-        range.end_key_ = (static_cast<uint32_t>(end[0]) << 16)
-                         | (static_cast<uint32_t>(end[1]) << 8) | end[2];
-      }
-      if (ordered_range_lookup_
-          && (compare_range_key(range.start_.get_word(), range.end_.get_word()) > 0
-              || (range_dicts_.size() > 0
-                  && compare_range_key(range_dicts_[range_dicts_.size() - 1].end_.get_word(),
-                                       range.start_.get_word()) >= 0))) {
-        ordered_range_lookup_ = false;
+      // Validate once while pinning this dictionary view. If a cache ever
+      // supplies overlapping or unordered ranges, retain first-match lookup.
+      if (compare_range_key(range.start_.get_word(), range.end_.get_word()) > 0
+          || (range_dicts_.size() > 0
+              && compare_range_key(range_dicts_[range_dicts_.size() - 1].end_.get_word(),
+                                   range.start_.get_word()) >= 0)) {
+        ordered_ranges_ = false;
       }
       if (OB_FAIL(range_dicts_.push_back(range))) {
       }
-    }
-  }
-  if (OB_SUCC(ret) && ObFTDictType::DICT_IK_MAIN == desc_.type_
-      && ObCollationType::CS_TYPE_UTF8MB4_BIN == desc_.coll_type_
-      && range_dicts_.size() > 0) {
-    fast_range_lookup_ = true;
-    for (int64_t i = 0; fast_range_lookup_ && i < range_dicts_.size(); ++i) {
-      const ObFTRange &range = range_dicts_[i];
-      fast_range_lookup_ = 3 == range.start_.word_len && 3 == range.end_.word_len
-                           && range.start_key_ <= range.end_key_
-                           && (0 == i || range_dicts_[i - 1].end_key_ < range.start_key_);
     }
   }
   return ret;

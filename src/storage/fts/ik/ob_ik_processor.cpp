@@ -52,8 +52,8 @@ TokenizeContext::TokenizeContext(ObCollationType coll_type,
                                  int64_t fulltext_len,
                                  bool is_smart)
     : coll_type_(coll_type), fulltext_(fulltext), fulltext_len_(fulltext_len), cursor_(0),
-      next_char_len_(0), next_unicode_(0), charset_type_(ObCharset::charset_type_by_coll(coll_type)),
-      handle_size_(0), is_smart_(is_smart), token_list_(allocator), result_list_(allocator)
+      next_char_len_(0), handle_size_(0), is_smart_(is_smart), token_list_(allocator),
+      result_list_(allocator)
 {
 }
 
@@ -74,27 +74,6 @@ int TokenizeContext::reset_resource()
   result_list_.reset();
   token_list_.reset();
   return OB_SUCCESS;
-}
-
-int TokenizeContext::reset_input(const char *fulltext, int64_t fulltext_len, bool is_smart)
-{
-  int ret = OB_SUCCESS;
-  if (OB_ISNULL(fulltext) || fulltext_len <= 0) {
-    ret = OB_INVALID_ARGUMENT;
-  } else {
-    fulltext_ = fulltext;
-    fulltext_len_ = fulltext_len;
-    cursor_ = 0;
-    next_char_len_ = 0;
-    next_char_type_ = ObFTCharUtil::CharType::USELESS;
-    next_unicode_ = 0;
-    handle_size_ = 0;
-    is_smart_ = is_smart;
-    if (OB_FAIL(reset_resource())) {
-    } else if (OB_FAIL(prepare_next_char())) {
-    }
-  }
-  return ret;
 }
 
 int TokenizeContext::current_char(const char *&ch, uint8_t &char_len)
@@ -120,89 +99,17 @@ int TokenizeContext::current_char_type(ObFTCharUtil::CharType &type)
   return ret;
 }
 
-int TokenizeContext::check_cn_number(bool &is_cn_number) const
-{
-  int ret = OB_SUCCESS;
-  if (CHARSET_UTF8MB4 == charset_type_) {
-    is_cn_number = ObUnicodeBlockUtils::is_unicode_cn_number(next_unicode_);
-  } else {
-    ret = ObFTCharUtil::check_cn_number(
-        coll_type_, fulltext_ + cursor_, static_cast<uint8_t>(next_char_len_), is_cn_number);
-  }
-  return ret;
-}
-
-int TokenizeContext::check_num_connector(bool &is_connector) const
-{
-  int ret = OB_SUCCESS;
-  if (CHARSET_UTF8MB4 == charset_type_) {
-    is_connector = ObUnicodeBlockUtils::check_num_connector(next_unicode_);
-  } else {
-    ret = ObFTCharUtil::check_num_connector(
-        coll_type_, fulltext_ + cursor_, static_cast<uint8_t>(next_char_len_), is_connector);
-  }
-  return ret;
-}
-
-int TokenizeContext::check_letter_connector(bool &is_connector) const
-{
-  int ret = OB_SUCCESS;
-  if (CHARSET_UTF8MB4 == charset_type_) {
-    is_connector = ObUnicodeBlockUtils::check_letter_connector(next_unicode_);
-  } else {
-    ret = ObFTCharUtil::check_letter_connector(
-        coll_type_, fulltext_ + cursor_, static_cast<uint8_t>(next_char_len_), is_connector);
-  }
-  return ret;
-}
-
 int TokenizeContext::prepare_next_char()
 {
   int ret = OB_SUCCESS;
-  const char *input = fulltext_ + cursor_;
-  const int64_t remaining = fulltext_len_ - cursor_;
-  if (CHARSET_UTF8MB4 == charset_type_ && remaining > 0) {
-    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(input);
-    const uint8_t lead = bytes[0];
-    if (lead < 0x80) {
-      next_char_len_ = 1;
-      next_unicode_ = lead;
-      next_char_type_ = (lead >= 'a' && lead <= 'z') || (lead >= 'A' && lead <= 'Z')
-                            ? ObFTCharUtil::CharType::ENGLISH_LETTER
-                        : (lead >= '0' && lead <= '9')
-                            ? ObFTCharUtil::CharType::ARABIC_LETTER
-                            : ObFTCharUtil::CharType::USELESS;
-      return ret;
-    }
-    if (lead >= 0xC2 && lead <= 0xDF && remaining >= 2
-        && (bytes[1] & 0xC0) == 0x80) {
-      next_char_len_ = 2;
-      next_unicode_ = ((lead & 0x1F) << 6) | (bytes[1] & 0x3F);
-    } else if (lead >= 0xE0 && lead <= 0xEF && remaining >= 3
-               && (bytes[1] & 0xC0) == 0x80 && (bytes[2] & 0xC0) == 0x80
-               && (lead != 0xE0 || bytes[1] >= 0xA0)
-               && (lead != 0xED || bytes[1] < 0xA0)) {
-      next_char_len_ = 3;
-      next_unicode_ = ((lead & 0x0F) << 12) | ((bytes[1] & 0x3F) << 6) | (bytes[2] & 0x3F);
-    } else if (lead >= 0xF0 && lead <= 0xF4 && remaining >= 4
-               && (bytes[1] & 0xC0) == 0x80 && (bytes[2] & 0xC0) == 0x80
-               && (bytes[3] & 0xC0) == 0x80
-               && (lead != 0xF0 || bytes[1] >= 0x90)
-               && (lead != 0xF4 || bytes[1] < 0x90)) {
-      next_char_len_ = 4;
-      next_unicode_ = ((lead & 0x07) << 18) | ((bytes[1] & 0x3F) << 12)
-                      | ((bytes[2] & 0x3F) << 6) | (bytes[3] & 0x3F);
-    } else {
-      next_char_len_ = 0;
-    }
-    if (0 != next_char_len_) {
-      ObFTCharUtil::classify_unicode(next_unicode_, next_char_type_);
-      return ret;
-    }
-  }
-  if (OB_FAIL(ObCharset::first_valid_char(coll_type_, input, remaining, next_char_len_))) {
-  } else if (OB_FAIL(ObFTCharUtil::classify_first_char(coll_type_, input, next_char_len_,
-                                                       next_char_type_, next_unicode_))) {
+  if (OB_FAIL(ObCharset::first_valid_char(coll_type_,
+                                          fulltext_ + cursor_,
+                                          fulltext_len_ - cursor_,
+                                          next_char_len_))) {
+  } else if (OB_FAIL(ObFTCharUtil::classify_first_char(coll_type_,
+                                                       fulltext_ + cursor_,
+                                                       next_char_len_,
+                                                       next_char_type_))) {
   }
   return ret;
 }

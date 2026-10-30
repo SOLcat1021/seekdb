@@ -1,0 +1,15 @@
+SELECT COUNT(*) AS rows_seen FROM r13_suffix_seen;
+rows_seen
+12000
+SELECT COUNT(*) AS suffix_ascending_mismatches FROM r13_suffix_seen s JOIN r13_suffix_expected e USING(seq) WHERE s.id<>e.id;
+suffix_ascending_mismatches
+0
+SELECT COUNT(*) AS suffix_descending_mismatches FROM r13_suffix_seen s JOIN r13_suffix_expected e USING(seq) WHERE s.id<>e.id;
+suffix_descending_mismatches
+0
+SELECT COUNT(*) AS suffix_mixed_direction_mismatches FROM r13_suffix_seen s JOIN r13_suffix_expected e USING(seq) WHERE s.id<>e.id;
+suffix_mixed_direction_mismatches
+0
+SELECT COUNT(*) AS suffix_null_fallback_mismatches FROM r13_suffix_seen s JOIN r13_suffix_expected e USING(seq) WHERE s.id<>e.id;
+suffix_null_fallback_mismatches
+0

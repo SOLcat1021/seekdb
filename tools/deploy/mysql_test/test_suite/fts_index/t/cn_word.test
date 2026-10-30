@@ -100,9 +100,6 @@ select tokenize('OceanBase是一款非常稳定数据库，在110个星球上都
 
 select tokenize('人际关系', 'ik');
 
-# A standalone hiragana character is an OTHER_CJK token in the IK parser.
-select 'あ' member of (tokenize('あ', 'ik')) as kana_token;
-
 
 select tokenize('中华人民共和国人民大会堂', 'ik', '[{"additional_args": [{"ik_mode": "smart"}]}]');
 

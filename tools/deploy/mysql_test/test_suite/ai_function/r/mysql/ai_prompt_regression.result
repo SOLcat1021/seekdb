@@ -1,0 +1,12 @@
+array_type	object_type
+ARRAY	OBJECT
+template_chars	argument_chars
+30000	90000
+repeated_ok
+1
+expanded_chars
+80005
+nested_ok
+1
+escaped_json_ok
+1

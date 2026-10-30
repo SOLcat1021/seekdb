@@ -16,6 +16,8 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "config_bridge.h"
+#include "lib/cpu/ob_cpu_topology.h"
+#include "lib/alloc/alloc_func.h"
 #include "ob_ddl_resolver.h"
 #include "data_plane/blocksstable/ob_index_block_util.h"
 #include "sql/resolver/dml/ob_dml_resolver.h"
@@ -7804,7 +7806,39 @@ int ObDDLResolver::resolve_hints(const ParseNode *node, ObDDLStmt &stmt, const O
     const int64_t table_dop = stmt::T_CREATE_INDEX == stmt.get_cmd_type() ? static_cast<ObCreateIndexStmt &>(stmt).get_index_dop() : table_schema.get_dop();
     if (OB_FAIL(calc_ddl_parallelism(hint_parallel, table_dop, parallelism))) {
     } else {
-      stmt.set_parallelism(parallelism);
+      bool is_fts_build = false;
+      if (stmt::T_CREATE_INDEX == stmt.get_cmd_type()) {
+        is_fts_build = static_cast<ObCreateIndexStmt &>(stmt).get_create_index_arg().index_type_
+                       == INDEX_TYPE_FTS_INDEX_LOCAL;
+      } else if (stmt::T_ALTER_TABLE == stmt.get_cmd_type()) {
+        ObAlterTableStmt &alter = static_cast<ObAlterTableStmt &>(stmt);
+        // CREATE INDEX arguments are still in the resolver's pending list;
+        // the executor transfers them into the ALTER RPC argument later.
+        const auto &args = alter.get_index_arg_list();
+        if (alter.get_alter_table_action_count() == 1 && args.count() == 1 && args.at(0) != nullptr) {
+          is_fts_build = args.at(0)->index_type_ == INDEX_TYPE_FTS_INDEX_LOCAL;
+        }
+      }
+      if (is_fts_build && parallelism == 1 && table_dop == 1 && !stmt.get_has_parallel_hint()) {
+        bool enable_parallel_ddl = false;
+        uint64_t forced_dop = 0;
+        if (OB_FAIL(session_info_->get_enable_parallel_ddl(enable_parallel_ddl))) {
+        } else if (OB_FAIL(session_info_->get_force_parallel_ddl_dop(forced_dop))) {
+        } else if (enable_parallel_ddl && forced_dop <= 1) {
+          // The FTS task divides this logical budget among three auxiliary
+          // builds. Bound each auxiliary by CPU and reserve 256 MiB for each
+          // of the three potential workers per degree, up to eight per build.
+          const int64_t cpu_budget = MAX(1L, common::get_cpu_count());
+          const int64_t memory_budget = MAX(1L, lib::get_memory_budget() / (768L * 1024 * 1024));
+          const int64_t degree = MIN(8L, MIN(cpu_budget, memory_budget));
+          if (degree > 1) {
+            parallelism = 3 * degree;
+          }
+        }
+      }
+      if (OB_SUCC(ret)) {
+        stmt.set_parallelism(parallelism);
+      }
     }
   }
   return ret;

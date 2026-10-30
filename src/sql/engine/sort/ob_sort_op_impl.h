@@ -272,6 +272,11 @@ public:
       const bool use_compact_format = false,
       const ObPushDownTopNFilterInfo *pd_topn_filter_info = nullptr);
 
+  // Prescan must drain the producer before a real sort spill. An estimated
+  // bound alone does not prove that a spill is needed: use the same managed
+  // budget extension as before_add_row(), without sorting or dumping here.
+  int prepare_prescan(bool &need_prescan) { return preprocess_dump(need_prescan); }
+
   virtual int64_t get_prefix_pos() const { return 0;  }
   // keep initialized, can sort same rows (same cell type, cell count, projector) after reuse.
   virtual void reuse();
@@ -481,6 +486,17 @@ public:
     int64_t cmp_start_;
     int64_t cmp_end_;
   private:
+    // Sort metadata is fixed for an initialized comparator. Keep common short
+    // key lists inline, avoiding two virtual array accesses per comparison.
+    // Longer lists retain the original array path for the remaining fields.
+    static const int64_t INLINE_FIELD_COUNT = 4;
+    struct PreparedField {
+      uint32_t field_idx_;
+      bool ascending_;
+      ObSortCmpFunc function_;
+    };
+    PreparedField prepared_fields_[INLINE_FIELD_COUNT];
+    int64_t prepared_count_;
     int64_t cnt_;
     DISALLOW_COPY_AND_ASSIGN(Compare);
   };
@@ -683,6 +699,8 @@ protected:
            && rows_->count() > datum_store_.get_row_cnt();
   }
   int sort_inmem_data();
+  int try_ranked_string_sort(bool &sorted);
+  int try_fixed_binary_sort(bool &sorted);
   int do_dump();
   int inner_dump_part_topn_heap();
 

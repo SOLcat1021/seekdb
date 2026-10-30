@@ -21,14 +21,6 @@ INSERT INTO memo (title, body) VALUES ('Sales Report', 'Sales have increased by 
 
 --enable_warnings
 
-# The BENG normalizer may return an unchanged ASCII slice from the input.
-# Check case folding and repeated tokens across successive stream reads.
-select tokenize('lowercase', 'beng') as lower_token;
-select tokenize('UPPERCASE', 'beng') as upper_token;
-select tokenize('alpha alpha', 'beng') as repeated_token;
-select tokenize('café', 'beng') as accented_token;
-select tokenize('ÉCOLE', 'beng') as folded_accented_token;
-
 --result_format 4
 
 

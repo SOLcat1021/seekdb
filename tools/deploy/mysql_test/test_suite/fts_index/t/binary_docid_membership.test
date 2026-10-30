@@ -1,0 +1,33 @@
+# Binary primary keys, duplicate postings, score projection and prepared membership.
+SET NAMES utf8mb4;
+--disable_warnings
+DROP TABLE IF EXISTS binary_docid_membership;
+--enable_warnings
+CREATE TABLE binary_docid_membership(id VARBINARY(32) PRIMARY KEY,body TEXT COLLATE utf8mb4_general_ci,FULLTEXT INDEX ft(body) WITH PARSER beng);
+INSERT INTO binary_docid_membership VALUES(X'','database audit'),(X'00','audit audit'),(X'20','database performance'),(X'2020','missing'),(X'00000000000000000000000000000000','DATABASE database audit'),(X'00000000000000000000000000000020','audit performance'),(X'01000000000000000000000000000001',NULL),(X'01000000000000000000000000000020',''),(X'010000000000000000000000000000ff','database performance audit'),(X'ffffffffffffffffffffffffffffffff','performance'),(X'0102030405060708090a0b0c0d0e0f101112','audit');
+SELECT COUNT(*) FROM binary_docid_membership WHERE MATCH(body) AGAINST('database audit');
+SELECT HEX(id) FROM binary_docid_membership WHERE MATCH(body) AGAINST('database audit') ORDER BY id;
+SELECT COUNT(*) FROM binary_docid_membership WHERE MATCH(body) AGAINST('performance');
+SELECT HEX(id) FROM binary_docid_membership WHERE MATCH(body) AGAINST('performance') ORDER BY id;
+SELECT COUNT(*) FROM binary_docid_membership WHERE MATCH(body) AGAINST('missing');
+SELECT HEX(id) FROM binary_docid_membership WHERE MATCH(body) AGAINST('missing') ORDER BY id;
+SELECT COUNT(*) FROM binary_docid_membership WHERE MATCH(body) AGAINST('absent');
+SELECT HEX(id) FROM binary_docid_membership WHERE MATCH(body) AGAINST('absent') ORDER BY id;
+SELECT COUNT(*) FROM binary_docid_membership WHERE MATCH(body) AGAINST('');
+SELECT HEX(id) FROM binary_docid_membership WHERE MATCH(body) AGAINST('') ORDER BY id;
+SELECT HEX(id),ROUND(MATCH(body) AGAINST('database audit'),6) FROM binary_docid_membership ORDER BY id;
+SELECT HEX(id),ROUND(MATCH(body) AGAINST('database audit'),6) score FROM binary_docid_membership WHERE MATCH(body) AGAINST('database audit') ORDER BY score DESC,id LIMIT 5;
+UPDATE binary_docid_membership SET body='performance performance' WHERE id=X'20';
+DELETE FROM binary_docid_membership WHERE id=X'00000000000000000000000000000020';
+PREPARE binary_docid_query FROM 'SELECT COUNT(*) FROM binary_docid_membership WHERE MATCH(body) AGAINST(?)';
+SET @q='database audit';
+EXECUTE binary_docid_query USING @q;
+SET @q='performance';
+EXECUTE binary_docid_query USING @q;
+SET @q='absent';
+EXECUTE binary_docid_query USING @q;
+SET @q=NULL;
+EXECUTE binary_docid_query USING @q;
+DEALLOCATE PREPARE binary_docid_query;
+SELECT HEX(id) FROM binary_docid_membership WHERE MATCH(body) AGAINST('database audit') ORDER BY id;
+DROP TABLE binary_docid_membership;

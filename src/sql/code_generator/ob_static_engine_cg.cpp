@@ -3681,7 +3681,32 @@ int ObStaticEngineCG::generate_normal_tsc(ObLogTableScan &op, ObTableScanSpec &s
       } else if (ddl_table_schema->is_fts_index_aux() || ddl_table_schema->is_fts_doc_word_aux()) {
         spec.is_fts_ddl_ = true;
         spec.is_fts_index_aux_ = ddl_table_schema->is_fts_index_aux();
-        spec.max_batch_size_ = 0; // TODO: @jinzhu, remove me later after support post-building fts index vectorization.
+        // DDL sampling may reorder projected columns. Retain the actual document
+        // identifier's output position instead of assuming it neighbors WORD_SEGMENT.
+        uint64_t doc_id_col_id = OB_INVALID_ID;
+        uint64_t word_col_id = OB_INVALID_ID;
+        ObDocIDType doc_id_type = ObDocIDType::INVALID;
+        spec.id_col_idx_ = -1;
+        if (OB_FAIL(ddl_table_schema->get_fulltext_typed_col_ids(
+                doc_id_col_id, doc_id_type, word_col_id))) {
+        } else if (OB_UNLIKELY(doc_id_col_id == OB_INVALID_ID)) {
+          ret = OB_ERR_UNEXPECTED;
+        }
+        for (int64_t i = 0; OB_SUCC(ret) && i < op.get_output_exprs().count(); ++i) {
+          const ObRawExpr *raw = op.get_output_exprs().at(i);
+          if (OB_ISNULL(raw)) {
+            ret = OB_ERR_UNEXPECTED;
+          } else if (raw->is_column_ref_expr()
+                     && static_cast<const ObColumnRefRawExpr *>(raw)->get_column_id() == doc_id_col_id) {
+            // generate_spec_basic() materializes output_ in this same order
+            // after the operator-specific code generation returns.
+            spec.id_col_idx_ = i;
+          }
+        }
+        if (OB_SUCC(ret) && OB_UNLIKELY(spec.id_col_idx_ < 0)) {
+          ret = OB_ERR_UNEXPECTED;
+        }
+
         if (OB_UNLIKELY(ddl_table_schema->get_parser_name_str().empty())) {
           ret = OB_ERR_UNEXPECTED;
         } else {

@@ -37,12 +37,6 @@ int ObIKCJKProcessor::do_process(TokenizeContext &ctx,
   int ret = OB_SUCCESS;
 
   if (ObFTCharUtil::CharType::USELESS != type) {
-    // The built-in IK main dictionary starts every word with a Chinese
-    // ideograph.  Keep processing existing hits because a word may contain
-    // another character later, but avoid a new dictionary lookup otherwise.
-    if (hits_.empty() && ObFTCharUtil::CharType::CHINESE != type) {
-      return ret;
-    }
     // handle previous hits_ first and then check from this char
     for (ObList<ObDATrieHit, ObIAllocator>::iterator iter = hits_.begin();
          OB_SUCC(ret) && iter != hits_.end();
@@ -66,7 +60,7 @@ int ObIKCJKProcessor::do_process(TokenizeContext &ctx,
         ret = OB_UNEXPECT_INTERNAL_ERROR;
       }
     }
-    if (OB_SUCC(ret) && ObFTCharUtil::CharType::CHINESE == type) {
+    if (OB_SUCC(ret)) {
       // Start from this char
       // find range of dict
       ObDATrieHit hit(&dict_main_, ctx.get_cursor());

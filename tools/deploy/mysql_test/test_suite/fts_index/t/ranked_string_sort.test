@@ -1,0 +1,44 @@
+# Run-local string ranks must preserve collation equivalence, direction,
+# secondary keys and NULL fallback. Integer ranks are an independent oracle.
+--disable_query_log
+--disable_warnings
+DROP TABLE IF EXISTS r13_rank_digits, r13_rank_data, r13_rank_seen, r13_rank_expected;
+--enable_warnings
+CREATE TABLE r13_rank_digits(n INT PRIMARY KEY);
+INSERT INTO r13_rank_digits VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9);
+CREATE TABLE r13_rank_data(id INT PRIMARY KEY,w VARCHAR(64) COLLATE utf8mb4_general_ci,k INT);
+INSERT INTO r13_rank_data
+SELECT id,CASE MOD(id,8) WHEN 0 THEN 'a' WHEN 1 THEN 'A' WHEN 2 THEN 'b' WHEN 3 THEN 'B' WHEN 4 THEN 'é' WHEN 5 THEN 'e' WHEN 6 THEN '中' ELSE '国' END,-id
+FROM (SELECT a.n+10*b.n+100*c.n+1000*d.n+10000*e.n id FROM r13_rank_digits a,r13_rank_digits b,r13_rank_digits c,r13_rank_digits d,r13_rank_digits e WHERE e.n<2) t WHERE id<12000;
+CREATE TABLE r13_rank_seen(seq INT AUTO_INCREMENT PRIMARY KEY,id INT NOT NULL);
+CREATE TABLE r13_rank_expected(seq INT AUTO_INCREMENT PRIMARY KEY,id INT NOT NULL);
+INSERT INTO r13_rank_seen(id) SELECT /*+ PARALLEL(1) */ id FROM r13_rank_data ORDER BY w,k DESC;
+INSERT INTO r13_rank_expected(id) SELECT /*+ PARALLEL(1) */ id FROM r13_rank_data ORDER BY CASE WHEN MOD(id,8)<6 THEN FLOOR(MOD(id,8)/2) ELSE MOD(id,8)-3 END,id;
+--enable_query_log
+SELECT COUNT(*) AS rows_seen FROM r13_rank_seen;
+SELECT COUNT(*) AS ci_ascending_mismatches FROM r13_rank_seen s JOIN r13_rank_expected e USING(seq) WHERE s.id<>e.id;
+SELECT seq,id FROM r13_rank_seen WHERE seq IN (1,2,3,3000,3001) ORDER BY seq;
+--disable_query_log
+TRUNCATE TABLE r13_rank_seen;
+TRUNCATE TABLE r13_rank_expected;
+INSERT INTO r13_rank_seen(id) SELECT /*+ PARALLEL(1) */ id FROM r13_rank_data ORDER BY w DESC,k;
+INSERT INTO r13_rank_expected(id) SELECT /*+ PARALLEL(1) */ id FROM r13_rank_data ORDER BY CASE WHEN MOD(id,8)<6 THEN FLOOR(MOD(id,8)/2) ELSE MOD(id,8)-3 END DESC,id DESC;
+--enable_query_log
+SELECT COUNT(*) AS ci_descending_mismatches FROM r13_rank_seen s JOIN r13_rank_expected e USING(seq) WHERE s.id<>e.id;
+--disable_query_log
+TRUNCATE TABLE r13_rank_seen;
+TRUNCATE TABLE r13_rank_expected;
+INSERT INTO r13_rank_seen(id) SELECT /*+ PARALLEL(1) */ id FROM r13_rank_data ORDER BY w COLLATE utf8mb4_bin,k DESC;
+INSERT INTO r13_rank_expected(id) SELECT /*+ PARALLEL(1) */ id FROM r13_rank_data ORDER BY CASE MOD(id,8) WHEN 1 THEN 0 WHEN 3 THEN 1 WHEN 0 THEN 2 WHEN 2 THEN 3 WHEN 5 THEN 4 WHEN 4 THEN 5 ELSE MOD(id,8) END,id;
+--enable_query_log
+SELECT COUNT(*) AS binary_mismatches FROM r13_rank_seen s JOIN r13_rank_expected e USING(seq) WHERE s.id<>e.id;
+--disable_query_log
+TRUNCATE TABLE r13_rank_seen;
+TRUNCATE TABLE r13_rank_expected;
+INSERT INTO r13_rank_seen(id) SELECT /*+ PARALLEL(1) */ id FROM r13_rank_data ORDER BY IF(MOD(id,11)=0,NULL,w),k DESC;
+INSERT INTO r13_rank_expected(id) SELECT /*+ PARALLEL(1) */ id FROM r13_rank_data ORDER BY CASE WHEN MOD(id,11)=0 THEN -1 WHEN MOD(id,8)<6 THEN FLOOR(MOD(id,8)/2) ELSE MOD(id,8)-3 END,id;
+--enable_query_log
+SELECT COUNT(*) AS null_fallback_mismatches FROM r13_rank_seen s JOIN r13_rank_expected e USING(seq) WHERE s.id<>e.id;
+--disable_query_log
+DROP TABLE r13_rank_digits, r13_rank_data, r13_rank_seen, r13_rank_expected;
+--enable_query_log

@@ -2202,6 +2202,9 @@ int ObTableScanOp::inner_get_next_batch(const int64_t max_row_cnt)
   if (OB_UNLIKELY(rand_scan_processor_.use_rand_scan())) {
     if (OB_FAIL(rand_scan_processor_.inner_get_next_batch(max_row_cnt))) {
     }
+  } else if (MY_SPEC.is_fts_ddl_ && nullptr == tsc_rtdef_.scan_rtdef_.sample_info_) {
+    if (OB_FAIL(inner_get_next_fts_index_batch(max_row_cnt))) {
+    }
   } else if (OB_FAIL(inner_get_next_batch_for_tsc(max_row_cnt))) {
   }
 
@@ -3643,6 +3646,82 @@ int ObTableScanOp::inner_get_next_fts_index_row()
   return ret;
 }
 
+int ObTableScanOp::inner_get_next_fts_index_batch(const int64_t max_row_cnt)
+{
+  int ret = OB_SUCCESS;
+  const int64_t capacity = MIN(max_row_cnt, MY_SPEC.max_batch_size_);
+  ObExpr *generated[4] = {nullptr, nullptr, nullptr, nullptr};
+  ObDatum *columns[4] = {nullptr, nullptr, nullptr, nullptr};
+  const ObExprOperatorType *types = MY_SPEC.is_fts_index_aux_
+      ? ObFTIndexRowCache::FTS_INDEX_EXPR_TYPE : ObFTIndexRowCache::FTS_DOC_WORD_EXPR_TYPE;
+  int64_t count = 0;
+  clear_evaluated_flag();
+  brs_.size_ = 0;
+  brs_.end_ = false;
+  ObEvalCtx::BatchInfoScopeGuard guard(eval_ctx_);
+  guard.set_batch_idx(0);
+  guard.set_batch_size(1);
+  for (int64_t c = 0; OB_SUCC(ret) && c < 4; ++c) {
+    if (OB_FAIL(get_output_fts_col_expr_by_type(types[c], generated[c]))) {
+    } else if (OB_ISNULL(generated[c]) || OB_UNLIKELY(!generated[c]->is_batch_result())) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      // Numeric setters write through datum.ptr_; restore each reserved result
+      // buffer before writing a batch, including slots reused after a prior
+      // child's shallow projection. Strings/doc IDs are assigned by reference.
+      columns[c] = c >= 2 ? generated[c]->locate_datums_for_update(eval_ctx_, capacity)
+                          : generated[c]->locate_batch_datums(eval_ctx_);
+    }
+  }
+  if (OB_SUCC(ret) && OB_FAIL(fts_index_.get_next_batch(columns, capacity, count))) {
+    if (OB_ITER_END != ret) {
+    } else if (OB_FAIL(fetch_next_fts_index_rows())) {
+      if (OB_ITER_END == ret) {
+        brs_.end_ = true;
+        ret = OB_SUCCESS;
+      }
+    } else {
+      // Fetching a source document can evaluate generated scalar placeholders
+      // and broadcast their datum pointers across the batch, especially after
+      // the range-sampling rescan. Reacquire distinct numeric result buffers
+      // after that fetch, before expanding the document's individual terms.
+      for (int64_t c = 2; c < 4; ++c) {
+        columns[c] = generated[c]->locate_datums_for_update(eval_ctx_, capacity);
+      }
+      if (OB_FAIL(fts_index_.get_next_batch(columns, capacity, count))) {
+      }
+    }
+  }
+  if (OB_SUCC(ret) && count > 0) {
+    // Partition/source values are common to this document, not to the whole
+    // scan. Do not fetch another document until the parent consumes the batch.
+    const ExprFixedArray &source = MY_CTDEF.get_das_output_exprs();
+    for (int64_t c = 0; OB_SUCC(ret) && c < source.count(); ++c) {
+      ObExpr *expr = source.at(c);
+      if (OB_ISNULL(expr)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (expr->is_batch_result()) {
+        ObDatum *datums = expr->locate_batch_datums(eval_ctx_);
+        for (int64_t i = 1; i < count; ++i) {
+          datums[i] = datums[0];
+        }
+        expr->get_evaluated_flags(eval_ctx_).set_all(count);
+        expr->set_evaluated_projected(eval_ctx_);
+      }
+    }
+    if (OB_SUCC(ret)) {
+      for (int64_t c = 0; c < 4; ++c) {
+        generated[c]->get_evaluated_flags(eval_ctx_).set_all(count);
+        generated[c]->set_evaluated_projected(eval_ctx_);
+      }
+      brs_.size_ = count;
+      brs_.skip_->reset(count);
+      brs_.set_all_rows_active(true);
+    }
+  }
+  return ret;
+}
+
 int ObTableScanOp::fetch_next_fts_index_rows()
 {
   int ret = OB_SUCCESS;
@@ -3722,18 +3801,13 @@ int ObTableScanOp::get_output_fts_col_expr_by_type(
                && T_FUN_SYS_DOC_LENGTH != type)) {
     ret = OB_INVALID_ARGUMENT;
   } else if (T_FUN_SYS_DOC_ID == type) {
-    for (int64_t i = 0; OB_SUCC(ret) && OB_ISNULL(expr) && i < MY_SPEC.output_.count(); ++i) {
-      ObExpr *tmp_expr = MY_SPEC.output_.at(i);
-      if (OB_ISNULL(tmp_expr)) {
-        ret = OB_ERR_UNEXPECTED;
-      } else if (T_FUN_SYS_WORD_SEGMENT == tmp_expr->type_) {
-        const int64_t idx = MY_SPEC.is_fts_index_aux_ ? i+1 : i-1;
-        if (OB_UNLIKELY(idx < 0 || idx >= MY_SPEC.output_.count())) {
-          ret = OB_ERR_UNEXPECTED;
-        } else {
-          expr = MY_SPEC.output_.at(idx);
-        }
-      }
+    // Parallel sampling can move the hidden rowkey ahead of WORD_SEGMENT.
+    // Bind by schema identity at code generation, never by output adjacency.
+    if (OB_UNLIKELY(MY_SPEC.id_col_idx_ < 0
+                   || MY_SPEC.id_col_idx_ >= MY_SPEC.output_.count())) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      expr = MY_SPEC.output_.at(MY_SPEC.id_col_idx_);
     }
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && OB_ISNULL(expr) && i < MY_SPEC.output_.count(); ++i) {

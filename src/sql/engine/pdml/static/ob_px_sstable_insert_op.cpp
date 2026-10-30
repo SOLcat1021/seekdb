@@ -471,8 +471,41 @@ int ObPxMultiPartSSTableInsertOp::write_ordered_slice_by_row()
   data_plane::ObDirectInsertAutoincParam autoinc_param;
   bool need_update_tablet_range_count = true;
 
+  bool use_batch_input = false;
+  if (OB_SUCC(ret) && child_->is_vectorized() && !need_autoinc_by_row()
+      && nullptr != MY_SPEC.plan_ && MY_SPEC.plan_->get_ddl_table_id() > 0) {
+    ObSqlCtx *sql_ctx = ctx_.get_sql_ctx();
+    const share::schema::ObTableSchema *schema = nullptr;
+    if (OB_ISNULL(sql_ctx) || OB_ISNULL(sql_ctx->schema_guard_)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(sql_ctx->schema_guard_->get_table_schema(
+                   MY_SPEC.plan_->get_ddl_table_id(), schema))) {
+    } else if (OB_ISNULL(schema)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      use_batch_input = schema->is_fts_index_aux() || schema->is_fts_doc_word_aux();
+    }
+  }
+  ObBatchRowIter batch_iter(child_);
+  ObEvalCtx::BatchInfoScopeGuard batch_guard(eval_ctx_);
+  auto next_input_row = [&]() -> int {
+    int next_ret = OB_SUCCESS;
+    if (!use_batch_input) {
+      next_ret = get_next_row_from_child(&op_monitor_info_.otherstat_2_value_);
+    } else {
+      batch_guard.set_batch_idx(0);
+      batch_guard.set_batch_size(1);
+      if (OB_SUCCESS == (next_ret = batch_iter.get_next_row())) {
+        batch_guard.set_batch_size(batch_iter.get_brs()->size_);
+        batch_guard.set_batch_idx(batch_iter.cur_idx());
+        ++op_monitor_info_.otherstat_2_value_;
+      }
+    }
+    return next_ret;
+  };
+
   while (OB_SUCC(ret) && !is_all_partition_finished_) {
-    if (OB_FAIL(get_next_row_from_child(&op_monitor_info_.otherstat_2_value_))) {
+    if (OB_FAIL(next_input_row())) {
       if (OB_ITER_END != ret) {
       } else {
         is_all_partition_finished_ = true;

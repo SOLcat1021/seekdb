@@ -22,7 +22,6 @@
 #include "storage/fts/dict/ob_ft_dict.h"
 #include "storage/fts/dict/ob_ft_dict_def.h"
 #include "storage/fts/ik/ob_ik_processor.h"
-#include "storage/fts/ik/ob_ik_arbitrator.h"
 #include "data_plane/fts/ob_fts_parser.h"
 
 #include <cstdint>
@@ -37,13 +36,11 @@ class ObIKFTParser final : public ObITokenIterator
 public:
   ObIKFTParser(ObIAllocator &allocator, ObFTDictHub *hub)
       : allocator_(allocator),
-        scratch_allocator_(lib::ObMemAttr("IK Scratch")),
         is_inited_(false),
         coll_type_(ObCollationType::CS_TYPE_INVALID),
         ctx_(nullptr),
         hub_(hub),
         segmenters_(allocator_),
-        arbitrator_(),
         cache_main_(allocator),
         cache_quan_(allocator),
         dict_main_(nullptr),
@@ -59,7 +56,6 @@ public:
                      int64_t &word_len,
                      int64_t &char_cnt,
                      int64_t &word_freq) override;
-  int reset_for_reuse(const ObFTParserParam &param) override;
 
   VIRTUAL_TO_STRING_KV(K(is_inited_));
 
@@ -93,17 +89,12 @@ private:
 private:
   static constexpr int SEGMENT_LIMIT = 1000;
   ObIAllocator &allocator_;
-  ObArenaAllocator scratch_allocator_;
   bool is_inited_;
 
   ObCollationType coll_type_;
   TokenizeContext *ctx_;
   ObFTDictHub *hub_;
   ObList<ObIIKProcessor *, ObIAllocator> segmenters_;
-  // Reused for every segmentation batch of this document.  The arbitrator
-  // owns only token-chain scratch state, so resetting its arena between
-  // batches preserves the exact token order while avoiding page churn.
-  ObIKArbitrator arbitrator_;
 
   // For now there's no change of dict in one query, so we can pin dict this level.
   ObFTCacheRangeContainer cache_main_;

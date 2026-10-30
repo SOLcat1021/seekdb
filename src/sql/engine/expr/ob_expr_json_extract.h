@@ -37,6 +37,8 @@ public:
                                 common::ObExprTypeCtx& type_ctx) const override;
   static int eval_json_extract(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res);
   static int eval_json_extract_null(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res);
+  static int eval_batch_json_input(const ObExpr &expr, ObEvalCtx &ctx,
+                                   const ObBitVector &skip, const int64_t size);
   virtual int cg_expr(ObExprCGCtx &expr_cg_ctx,
                       const ObRawExpr &raw_expr,
                       ObExpr &rt_expr) const override;

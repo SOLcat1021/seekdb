@@ -125,9 +125,8 @@ int ObGenDicLoader::get_dic_loader(const ObString &parser_name,
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(dic_loader_key.init(parser_name, charset))) {
   } else {
-    // Existing loaders are immutable after publication. Let concurrent
-    // parser setup share the read lock; only a cache miss takes the writer
-    // lock and repeats the lookup before constructing a loader.
+    // Published loaders are pinned by the map, and handle reference counts
+    // are atomic. Cache hits need only a shared lock.
     {
       TCRLockGuard guard(lock_);
       if (OB_FAIL(dic_loader_map_.get_refactored(dic_loader_key, dic_loader))) {
@@ -138,6 +137,8 @@ int ObGenDicLoader::get_dic_loader(const ObString &parser_name,
       }
     }
     if (OB_HASH_NOT_EXIST == ret) {
+      // Recheck after obtaining the exclusive lock: another caller may have
+      // published this loader while we were waiting.
       ret = OB_SUCCESS;
       TCWLockGuard guard(lock_);
       if (OB_FAIL(dic_loader_map_.get_refactored(dic_loader_key, dic_loader))) {
@@ -152,9 +153,7 @@ int ObGenDicLoader::get_dic_loader(const ObString &parser_name,
         } else {
           ret = OB_ERR_UNEXPECTED;
         }
-      } else {
-        if (OB_FAIL(loader_handle.set_loader(dic_loader))) {
-        }
+      } else if (OB_FAIL(loader_handle.set_loader(dic_loader))) {
       }
     }
   }

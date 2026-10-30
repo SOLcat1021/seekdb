@@ -25,6 +25,7 @@
 #include "data_plane/fts/ob_fts_doc_word_scan.h"
 #include "data_plane/fts/ob_fts_parser_helper.h"
 #include "share/geo/ob_srs_provider.h"
+#include "data_plane/blocksstable/ob_datum_row.h"
 
 namespace oceanbase
 {
@@ -48,18 +49,22 @@ public:
       const common::ObString &parser_properties);
   int segment(const common::ObObjMeta &ft_obj_meta, const ObDatum &doc_id, const common::ObString &fulltext);
   int get_next_row(blocksstable::ObDatumRow *&row);
+  int get_next_batch(common::ObDatum **columns, const int64_t capacity, int64_t &count);
   void reset();
   void reuse();
   TO_STRING_KV(K_(row_idx), K_(is_fts_index_aux), K_(helper), K_(is_inited),
-               "row_count", rows_.count());
+               "row_count", word_map_.size());
 private:
   lib::MemoryContext merge_memctx_;
-  common::ObArenaAllocator parser_allocator_;
-  ObDomainIndexRow rows_;
+  blocksstable::ObDatumRow row_;
+  common::ObDatum doc_id_;
+  int64_t doc_length_;
   uint64_t row_idx_;
   bool is_fts_index_aux_;
   storage::ObFTParseHelper helper_;
   storage::ObFTWordMap word_map_;
+  storage::ObFTWordMap::const_iterator word_iter_;
+  bool release_word_map_;
   bool is_inited_;
 
   DISALLOW_COPY_AND_ASSIGN(ObFTIndexRowCache);
@@ -362,9 +367,7 @@ public:
     doc_word_info_(ft_doc_word_info),
     ft_doc_word_iter_(nullptr),
     ft_doc_word_allocator_(allocator),
-    parser_allocator_(),
     ft_parse_helper_(),
-    word_map_(),
     is_inited_(false)
   {
     ObDomainDMLIterator::mode_ = mode;
@@ -397,11 +400,7 @@ private:
   const ObFTDocWordInfo *doc_word_info_;
   data_plane::ObFTDocWordIterator *ft_doc_word_iter_;
   common::ObArenaAllocator ft_doc_word_allocator_;
-  common::ObArenaAllocator parser_allocator_;
   storage::ObFTParseHelper ft_parse_helper_;
-  // Reused for normal-sized documents so each FTS DML row does not rebuild
-  // the same token-frequency hash buckets.
-  storage::ObFTWordMap word_map_;
   bool is_inited_;
 };
 

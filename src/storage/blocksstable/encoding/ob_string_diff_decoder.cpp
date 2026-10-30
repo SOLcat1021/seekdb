@@ -160,15 +160,34 @@ int ObStringDiffDecoder::batch_decode(
     // Fill string data
     const uint16_t string_size = header_->string_size_;
     const static uint16_t min_buf_size = 128;
-    const int64_t buf_size = std::max(string_size, min_buf_size);
+    // Binary VARCHAR values need neither character padding nor numeric
+    // conversion scratch. Pack fixed 16-byte values densely within this
+    // batch's owned allocation, preserving a distinct writable slot per row.
+    const bool compact_binary = string_size == 16
+        && ctx.obj_meta_.get_type() == ObVarcharType
+        && ctx.obj_meta_.get_collation_type() == CS_TYPE_BINARY;
+    const int64_t buf_size = compact_binary ? 16 : std::max(string_size, min_buf_size);
     char *buf = nullptr;
     if (OB_FAIL(ret)) {
     } else if (OB_ISNULL(buf = static_cast<char *>(ctx.allocator_->alloc(buf_size * row_cap)))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
     } else {
-      for (int64_t i = 0; i < row_cap; ++i) {
+        if (row_cap > 0) {
+          // Expand the shared bitmap once, before any row-specific bytes are
+          // overlaid. Initialize holes so the template copy never reads them
+          // uninitialized; each non-null row fills those holes below.
+          MEMSET(buf, 0, string_size);
         header_->copy_string(ObStringDiffHeader::LeftToRight(), std::logical_not<uint8_t>(),
-            header_->common_data(), buf + i * buf_size);
+              header_->common_data(), buf);
+          if (compact_binary) {
+            for (int64_t i = 1; i < row_cap; ++i) {
+              MEMCPY(buf + i * 16, buf, 16);
+            }
+          } else {
+            for (int64_t i = 1; i < row_cap; ++i) {
+              MEMCPY(buf + i * buf_size, buf, string_size);
+            }
+          }
       }
     }
 

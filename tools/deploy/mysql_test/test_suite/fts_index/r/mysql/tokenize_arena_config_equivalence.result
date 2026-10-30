@@ -1,0 +1,201 @@
+SET NAMES utf8mb4;
+SELECT TOKENIZE(NULL);
+TOKENIZE(NULL)
+[]
+SELECT TOKENIZE('OceanBase 数据库');
+TOKENIZE('OceanBase 数据库')
+["oceanbase", "数据库"]
+SELECT TOKENIZE(NULL,'space');
+TOKENIZE(NULL,'space')
+[]
+SELECT TOKENIZE(NULL,'space','[]');
+TOKENIZE(NULL,'space','[]')
+[]
+SELECT TOKENIZE(NULL,'space','[{"output":"DEFAULT"}]');
+TOKENIZE(NULL,'space','[{"output":"DEFAULT"}]')
+[]
+SELECT TOKENIZE(NULL,'space','[{"output":"ALL"}]');
+TOKENIZE(NULL,'space','[{"output":"ALL"}]')
+{"tokens": [], "doc_len": 0}
+SELECT TOKENIZE('','space');
+TOKENIZE('','space')
+[]
+SELECT TOKENIZE('','space','[]');
+TOKENIZE('','space','[]')
+[]
+SELECT TOKENIZE('','space','[{"output":"DEFAULT"}]');
+TOKENIZE('','space','[{"output":"DEFAULT"}]')
+[]
+SELECT TOKENIZE('','space','[{"output":"ALL"}]');
+TOKENIZE('','space','[{"output":"ALL"}]')
+{"tokens": [], "doc_len": 0}
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','space');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','space')
+["123", "aaa", "中文数据库研究生命三公斤", "oceanbase", "database"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','space','[]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','space','[]')
+["123", "aaa", "中文数据库研究生命三公斤", "oceanbase", "database"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','space','[{"output":"DEFAULT"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','space','[{"output":"DEFAULT"}]')
+["123", "aaa", "中文数据库研究生命三公斤", "oceanbase", "database"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','space','[{"output":"ALL"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','space','[{"output":"ALL"}]')
+{"tokens": [{"123": 1}, {"aaa": 1}, {"中文数据库研究生命三公斤": 1}, {"oceanbase": 1}, {"database": 2}], "doc_len": 6}
+SELECT TOKENIZE(NULL,'beng');
+TOKENIZE(NULL,'beng')
+[]
+SELECT TOKENIZE(NULL,'beng','[]');
+TOKENIZE(NULL,'beng','[]')
+[]
+SELECT TOKENIZE(NULL,'beng','[{"output":"DEFAULT"}]');
+TOKENIZE(NULL,'beng','[{"output":"DEFAULT"}]')
+[]
+SELECT TOKENIZE(NULL,'beng','[{"output":"ALL"}]');
+TOKENIZE(NULL,'beng','[{"output":"ALL"}]')
+{"tokens": [], "doc_len": 0}
+SELECT TOKENIZE('','beng');
+TOKENIZE('','beng')
+[]
+SELECT TOKENIZE('','beng','[]');
+TOKENIZE('','beng','[]')
+[]
+SELECT TOKENIZE('','beng','[{"output":"DEFAULT"}]');
+TOKENIZE('','beng','[{"output":"DEFAULT"}]')
+[]
+SELECT TOKENIZE('','beng','[{"output":"ALL"}]');
+TOKENIZE('','beng','[{"output":"ALL"}]')
+{"tokens": [], "doc_len": 0}
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','beng');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','beng')
+["123", "aaa", "中文数据库研究生命三公斤", "oceanbase", "database"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','beng','[]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','beng','[]')
+["123", "aaa", "中文数据库研究生命三公斤", "oceanbase", "database"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','beng','[{"output":"DEFAULT"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','beng','[{"output":"DEFAULT"}]')
+["123", "aaa", "中文数据库研究生命三公斤", "oceanbase", "database"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','beng','[{"output":"ALL"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','beng','[{"output":"ALL"}]')
+{"tokens": [{"123": 1}, {"aaa": 1}, {"中文数据库研究生命三公斤": 1}, {"oceanbase": 1}, {"database": 2}], "doc_len": 6}
+SELECT TOKENIZE(NULL,'ngram');
+TOKENIZE(NULL,'ngram')
+[]
+SELECT TOKENIZE(NULL,'ngram','[]');
+TOKENIZE(NULL,'ngram','[]')
+[]
+SELECT TOKENIZE(NULL,'ngram','[{"output":"DEFAULT"}]');
+TOKENIZE(NULL,'ngram','[{"output":"DEFAULT"}]')
+[]
+SELECT TOKENIZE(NULL,'ngram','[{"output":"ALL"}]');
+TOKENIZE(NULL,'ngram','[{"output":"ALL"}]')
+{"tokens": [], "doc_len": 0}
+SELECT TOKENIZE('','ngram');
+TOKENIZE('','ngram')
+[]
+SELECT TOKENIZE('','ngram','[]');
+TOKENIZE('','ngram','[]')
+[]
+SELECT TOKENIZE('','ngram','[{"output":"DEFAULT"}]');
+TOKENIZE('','ngram','[{"output":"DEFAULT"}]')
+[]
+SELECT TOKENIZE('','ngram','[{"output":"ALL"}]');
+TOKENIZE('','ngram','[{"output":"ALL"}]')
+{"tokens": [], "doc_len": 0}
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram')
+["ab", "公斤", "ea", "数据", "库研", "oc", "三公", "ce", "at", "研究", "se", "12", "da", "ta", "ba", "23", "据库", "文数", "nb", "中文", "究生", "an", "生命", "as", "aa", "命三"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram','[]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram','[]')
+["ab", "公斤", "ea", "数据", "库研", "oc", "三公", "ce", "at", "研究", "se", "12", "da", "ta", "ba", "23", "据库", "文数", "nb", "中文", "究生", "an", "生命", "as", "aa", "命三"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram','[{"output":"DEFAULT"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram','[{"output":"DEFAULT"}]')
+["ab", "公斤", "ea", "数据", "库研", "oc", "三公", "ce", "at", "研究", "se", "12", "da", "ta", "ba", "23", "据库", "文数", "nb", "中文", "究生", "an", "生命", "as", "aa", "命三"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram','[{"output":"ALL"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram','[{"output":"ALL"}]')
+{"tokens": [{"ab": 2}, {"公斤": 1}, {"ea": 1}, {"数据": 1}, {"库研": 1}, {"oc": 1}, {"三公": 1}, {"ce": 1}, {"at": 2}, {"研究": 1}, {"se": 3}, {"12": 1}, {"da": 2}, {"ta": 2}, {"ba": 3}, {"23": 1}, {"据库": 1}, {"文数": 1}, {"nb": 1}, {"中文": 1}, {"究生": 1}, {"an": 1}, {"生命": 1}, {"as": 3}, {"aa": 2}, {"命三": 1}], "doc_len": 37}
+SELECT TOKENIZE(NULL,'ngram2');
+TOKENIZE(NULL,'ngram2')
+[]
+SELECT TOKENIZE(NULL,'ngram2','[]');
+TOKENIZE(NULL,'ngram2','[]')
+[]
+SELECT TOKENIZE(NULL,'ngram2','[{"output":"DEFAULT"}]');
+TOKENIZE(NULL,'ngram2','[{"output":"DEFAULT"}]')
+[]
+SELECT TOKENIZE(NULL,'ngram2','[{"output":"ALL"}]');
+TOKENIZE(NULL,'ngram2','[{"output":"ALL"}]')
+{"tokens": [], "doc_len": 0}
+SELECT TOKENIZE('','ngram2');
+TOKENIZE('','ngram2')
+[]
+SELECT TOKENIZE('','ngram2','[]');
+TOKENIZE('','ngram2','[]')
+[]
+SELECT TOKENIZE('','ngram2','[{"output":"DEFAULT"}]');
+TOKENIZE('','ngram2','[{"output":"DEFAULT"}]')
+[]
+SELECT TOKENIZE('','ngram2','[{"output":"ALL"}]');
+TOKENIZE('','ngram2','[{"output":"ALL"}]')
+{"tokens": [], "doc_len": 0}
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram2');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram2')
+["ab", "公斤", "bas", "ea", "数据", "库研", "据库研", "123", "ean", "oc", "三公", "命三公", "研究生", "ce", "文数据", "aaa", "at", "ase", "生命三", "研究", "库研究", "se", "12", "oce", "da", "ta", "ba", "23", "nba", "据库", "究生命", "ata", "aba", "数据库", "文数", "nb", "中文", "究生", "tab", "an", "dat", "生命", "三公斤", "cea", "as", "aa", "中文数", "命三", "anb"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram2','[]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram2','[]')
+["ab", "公斤", "bas", "ea", "数据", "库研", "据库研", "123", "ean", "oc", "三公", "命三公", "研究生", "ce", "文数据", "aaa", "at", "ase", "生命三", "研究", "库研究", "se", "12", "oce", "da", "ta", "ba", "23", "nba", "据库", "究生命", "ata", "aba", "数据库", "文数", "nb", "中文", "究生", "tab", "an", "dat", "生命", "三公斤", "cea", "as", "aa", "中文数", "命三", "anb"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram2','[{"output":"DEFAULT"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram2','[{"output":"DEFAULT"}]')
+["ab", "公斤", "bas", "ea", "数据", "库研", "据库研", "123", "ean", "oc", "三公", "命三公", "研究生", "ce", "文数据", "aaa", "at", "ase", "生命三", "研究", "库研究", "se", "12", "oce", "da", "ta", "ba", "23", "nba", "据库", "究生命", "ata", "aba", "数据库", "文数", "nb", "中文", "究生", "tab", "an", "dat", "生命", "三公斤", "cea", "as", "aa", "中文数", "命三", "anb"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram2','[{"output":"ALL"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ngram2','[{"output":"ALL"}]')
+{"tokens": [{"ab": 2}, {"公斤": 1}, {"bas": 3}, {"ea": 1}, {"数据": 1}, {"库研": 1}, {"据库研": 1}, {"123": 1}, {"ean": 1}, {"oc": 1}, {"三公": 1}, {"命三公": 1}, {"研究生": 1}, {"ce": 1}, {"文数据": 1}, {"aaa": 1}, {"at": 2}, {"ase": 3}, {"生命三": 1}, {"研究": 1}, {"库研究": 1}, {"se": 3}, {"12": 1}, {"oce": 1}, {"da": 2}, {"ta": 2}, {"ba": 3}, {"23": 1}, {"nba": 1}, {"据库": 1}, {"究生命": 1}, {"ata": 2}, {"aba": 2}, {"数据库": 1}, {"文数": 1}, {"nb": 1}, {"中文": 1}, {"究生": 1}, {"tab": 2}, {"an": 1}, {"dat": 2}, {"生命": 1}, {"三公斤": 1}, {"cea": 1}, {"as": 3}, {"aa": 2}, {"中文数": 1}, {"命三": 1}, {"anb": 1}], "doc_len": 68}
+SELECT TOKENIZE('','ik');
+TOKENIZE('','ik')
+[]
+SELECT TOKENIZE('','ik','[]');
+TOKENIZE('','ik','[]')
+[]
+SELECT TOKENIZE('','ik','[{"output":"DEFAULT"}]');
+TOKENIZE('','ik','[{"output":"DEFAULT"}]')
+[]
+SELECT TOKENIZE('','ik','[{"output":"ALL"}]');
+TOKENIZE('','ik','[{"output":"ALL"}]')
+{"tokens": [], "doc_len": 0}
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ik');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ik')
+["123", "aaa", "研究", "oceanbase", "database", "数据库", "中文", "生命", "三公斤"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ik','[]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ik','[]')
+["123", "aaa", "研究", "oceanbase", "database", "数据库", "中文", "生命", "三公斤"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ik','[{"output":"DEFAULT"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ik','[{"output":"DEFAULT"}]')
+["123", "aaa", "研究", "oceanbase", "database", "数据库", "中文", "生命", "三公斤"]
+SELECT TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ik','[{"output":"ALL"}]');
+TOKENIZE('OceanBase DATABASE database aaa 123 中文数据库研究生命三公斤','ik','[{"output":"ALL"}]')
+{"tokens": [{"123": 1}, {"aaa": 1}, {"研究": 1}, {"oceanbase": 1}, {"database": 2}, {"数据库": 1}, {"中文": 1}, {"生命": 1}, {"三公斤": 1}], "doc_len": 10}
+PREPARE cfg_stmt FROM 'SELECT TOKENIZE(?, ?, ?)';
+SET @txt='Abc 数据库 test', @parser='beng', @cfg='[{"output":"DEFAULT"}]';
+EXECUTE cfg_stmt USING @txt,@parser,@cfg;
+TOKENIZE(?, ?, ?)
+["数据库", "test", "abc"]
+SET @txt='Abc 数据库 test', @parser='beng', @cfg='[{"output":"ALL"}]';
+EXECUTE cfg_stmt USING @txt,@parser,@cfg;
+TOKENIZE(?, ?, ?)
+{"tokens": [{"数据库": 1}, {"test": 1}, {"abc": 1}], "doc_len": 3}
+SET @txt='Abc 数据库 test', @parser='ik', @cfg='[{"output":"DEFAULT"}]';
+EXECUTE cfg_stmt USING @txt,@parser,@cfg;
+TOKENIZE(?, ?, ?)
+["数据库", "test", "abc"]
+SET @txt='Abc 数据库 test', @parser='ik', @cfg='[{"output":"ALL"}]';
+EXECUTE cfg_stmt USING @txt,@parser,@cfg;
+TOKENIZE(?, ?, ?)
+{"tokens": [{"数据库": 1}, {"test": 1}, {"abc": 1}], "doc_len": 3}
+SET @txt='Abc 数据库 test', @parser='ngram', @cfg='[{"output":"DEFAULT"}]';
+EXECUTE cfg_stmt USING @txt,@parser,@cfg;
+TOKENIZE(?, ?, ?)
+["ab", "st", "数据", "es", "据库", "te", "bc"]
+SET @txt='Abc 数据库 test', @parser='ngram', @cfg='[{"output":"ALL"}]';
+EXECUTE cfg_stmt USING @txt,@parser,@cfg;
+TOKENIZE(?, ?, ?)
+{"tokens": [{"ab": 1}, {"st": 1}, {"数据": 1}, {"es": 1}, {"据库": 1}, {"te": 1}, {"bc": 1}], "doc_len": 7}
+DEALLOCATE PREPARE cfg_stmt;

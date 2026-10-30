@@ -1,0 +1,22 @@
+SELECT COUNT(*) AS rows_seen FROM r13_rank_seen;
+rows_seen
+12000
+SELECT COUNT(*) AS ci_ascending_mismatches FROM r13_rank_seen s JOIN r13_rank_expected e USING(seq) WHERE s.id<>e.id;
+ci_ascending_mismatches
+0
+SELECT seq,id FROM r13_rank_seen WHERE seq IN (1,2,3,3000,3001) ORDER BY seq;
+seq	id
+1	0
+2	1
+3	8
+3000	11993
+3001	2
+SELECT COUNT(*) AS ci_descending_mismatches FROM r13_rank_seen s JOIN r13_rank_expected e USING(seq) WHERE s.id<>e.id;
+ci_descending_mismatches
+0
+SELECT COUNT(*) AS binary_mismatches FROM r13_rank_seen s JOIN r13_rank_expected e USING(seq) WHERE s.id<>e.id;
+binary_mismatches
+0
+SELECT COUNT(*) AS null_fallback_mismatches FROM r13_rank_seen s JOIN r13_rank_expected e USING(seq) WHERE s.id<>e.id;
+null_fallback_mismatches
+0

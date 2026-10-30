@@ -387,6 +387,41 @@ struct ObDatumStrCmp : public ObDefined<SupportedCollection<CS_TYPE>::defined_>
 {
   inline static int cmp(const ObDatum &l, const ObDatum &r, int &cmp_ret)
   {
+    // These collations have process-lifetime descriptors. Resolve the descriptor
+    // once per instantiation rather than validating and dispatching it for every
+    // comparison in a sort/merge. Keep the generic validation for invalid datums.
+    if (CS_TYPE == CS_TYPE_BINARY || CS_TYPE == CS_TYPE_UTF8MB4_GENERAL_CI
+        || CS_TYPE == CS_TYPE_UTF8MB4_BIN || CS_TYPE == CS_TYPE_UTF8MB4_UNICODE_CI) {
+      if (OB_LIKELY((l.len_ == 0 || l.ptr_ != nullptr)
+                    && (r.len_ == 0 || r.ptr_ != nullptr))) {
+        if (CS_TYPE == CS_TYPE_BINARY) {
+          // The binary collation ignores WITH_END_SPACE and compares every
+          // byte, including trailing spaces. Use its exact primitive once:
+          // an equality probe followed by collation dispatch compares unequal
+          // document IDs twice and adds an indirect call in every sort step.
+          const int64_t length = min(l.len_, r.len_);
+          int result = (length == 0 || l.ptr_ == r.ptr_) ? 0 : MEMCMP(l.ptr_, r.ptr_, length);
+          if (result == 0) {
+            result = static_cast<int>(static_cast<size_t>(l.len_) - static_cast<size_t>(r.len_));
+          }
+          cmp_ret = result > 0 ? 1 : (result < 0 ? -1 : 0);
+          return OB_SUCCESS;
+        }
+        if (l.len_ == r.len_ && l.len_ <= 64
+            && (l.len_ == 0 || l.ptr_ == r.ptr_ || MEMCMP(l.ptr_, r.ptr_, l.len_) == 0)) {
+          cmp_ret = 0;
+          return OB_SUCCESS;
+        }
+        static const ObCharsetInfo *cs = ObCharset::get_charset(CS_TYPE);
+        if (OB_LIKELY(cs != nullptr && cs->coll != nullptr)) {
+          cmp_ret = cs->coll->strnncollsp(cs,
+              reinterpret_cast<const unsigned char *>(l.ptr_), l.len_,
+              reinterpret_cast<const unsigned char *>(r.ptr_), r.len_, WITH_END_SPACE);
+          cmp_ret = cmp_ret > 0 ? 1 : (cmp_ret < 0 ? -1 : 0);
+          return OB_SUCCESS;
+        }
+      }
+    }
     return ObDatumStrCmpImpl::cmp(l, r, cmp_ret, CS_TYPE, WITH_END_SPACE);
   }
 };

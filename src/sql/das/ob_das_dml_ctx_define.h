@@ -480,9 +480,6 @@ public:
       allocator_(alloc),
       cur_datum_row_(nullptr),
       cur_datum_rows_(nullptr),
-      pending_domain_rows_(nullptr),
-      pending_domain_row_count_(0),
-      pending_domain_row_idx_(0),
       main_ctdef_(das_ctdef),
       domain_iter_(nullptr),
       ft_doc_word_info_(nullptr),
@@ -516,12 +513,6 @@ private:
   common::ObIAllocator &allocator_;
   blocksstable::ObDatumRow *cur_datum_row_;
   blocksstable::ObDatumRow *cur_datum_rows_;
-  // A domain iterator returns all rows for one document. Keep an unconsumed
-  // tail here when that document crosses the DAS batch boundary; the source
-  // arena is not reset until the next domain-iterator call.
-  blocksstable::ObDatumRow *pending_domain_rows_;
-  int64_t pending_domain_row_count_;
-  int64_t pending_domain_row_idx_;
   const ObDASDMLBaseCtDef *main_ctdef_;
   ObDomainDMLIterator *domain_iter_;
   const ObFTDocWordInfo *ft_doc_word_info_;

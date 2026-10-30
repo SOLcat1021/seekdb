@@ -27,6 +27,7 @@
 #include "storage/fts/ob_ik_ft_parser.h"
 #include "storage/fts/ob_ngram2_ft_parser.h"
 #include "storage/fts/ob_ngram_ft_parser.h"
+#include "common/json_type/ob_json_bin.h"
 #include "data_plane/fts/ob_fts_parser_property.h"
 #include "storage/fts/ob_fts_stop_word.h"
 #include "storage/fts/ob_whitespace_ft_parser.h"
@@ -309,74 +310,12 @@ int ObFTParseHelper::segment(
   return ret;
 }
 
-int ObFTParseHelper::segment_with_cache(
-    const ObCharsetInfo *cs,
-    const char *fulltext,
-    const int64_t fulltext_len,
-    ObAddWord &add_word) const
-{
-  int ret = OB_SUCCESS;
-  ObFTParserParam param;
-  ObITokenIterator *iter = nullptr;
-  param.allocator_ = allocator_;
-  param.cs_ = cs;
-  param.fulltext_ = fulltext;
-  param.ft_length_ = fulltext_len;
-  param.parser_version_ = parser_name_.get_parser_version();
-  param.ngram_token_size_ = parser_property_.ngram_token_size_;
-  param.ik_param_.mode_ = parser_property_.ik_mode_smart_
-      ? ObFTIKParam::Mode::SMART : ObFTIKParam::Mode::MAX_WORD;
-  param.min_ngram_size_ = parser_property_.min_ngram_token_size_;
-  param.max_ngram_size_ = parser_property_.max_ngram_token_size_;
-
-  if (OB_NOT_NULL(cached_iter_)) {
-    const int reuse_ret = cached_iter_->reset_for_reuse(param);
-    if (OB_SUCCESS == reuse_ret) {
-      iter = cached_iter_;
-    } else {
-      parser_desc_->free_token_iter(&cached_param_, cached_iter_);
-      cached_param_.reset();
-      cached_iter_ = nullptr;
-    }
-  }
-  if (OB_ISNULL(iter) && OB_FAIL(parser_desc_->segment(&param, iter))) {
-  } else if (OB_ISNULL(iter)) {
-    ret = OB_ERR_UNEXPECTED;
-  } else {
-    if (OB_ISNULL(cached_iter_)) {
-      cached_iter_ = iter;
-      cached_param_ = param;
-    }
-    const char *word = nullptr;
-    int64_t word_len = 0;
-    int64_t char_cnt = 0;
-    int64_t word_freq = 0;
-    while (OB_SUCC(ret)) {
-      if (OB_FAIL(iter->get_next_token(word, word_len, char_cnt, word_freq))) {
-        if (OB_ITER_END != ret) {
-        }
-      } else if (OB_FAIL(add_word.process_word(word, word_len, char_cnt, word_freq))) {
-      }
-    }
-    if (OB_ITER_END == ret) {
-      ret = OB_SUCCESS;
-    }
-  }
-  if (OB_NOT_NULL(iter) && iter != cached_iter_) {
-    parser_desc_->free_token_iter(&param, iter);
-    iter = nullptr;
-  }
-  return ret;
-}
-
 ObFTParseHelper::ObFTParseHelper()
     : allocator_(nullptr),
     parser_desc_(nullptr),
     parser_name_(),
     add_word_flag_(),
     parser_property_(),
-    cached_iter_(nullptr),
-    cached_param_(),
     is_inited_(false)
 {
 }
@@ -412,26 +351,35 @@ int ObFTParseHelper::init(
   return ret;
 }
 
-int ObFTParseHelper::bind_allocator(common::ObIAllocator *allocator)
+int ObFTParseHelper::init(
+    common::ObIAllocator *allocator,
+    const common::ObString &parser_name,
+    const ObFTParserProperty &parser_properties)
 {
   int ret = OB_SUCCESS;
-  if (OB_ISNULL(allocator)) {
+  if (OB_UNLIKELY(is_inited_)) {
+    ret = OB_INIT_TWICE;
+  } else if (OB_ISNULL(allocator) || OB_UNLIKELY(parser_name.empty())) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (OB_UNLIKELY(!is_inited_)) {
-    ret = OB_NOT_INIT;
+  } else if (OB_FAIL(parser_name_.parse_from_str(parser_name.ptr(), parser_name.length()))) {
+
+  } else if (OB_FAIL(parser_name_.get_desc(parser_desc_))) {
+  } else if (OB_ISNULL(parser_desc_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(set_add_word_flag(*parser_desc_))) {
   } else {
+    parser_property_ = parser_properties;
     allocator_ = allocator;
+    is_inited_ = true;
+  }
+  if (OB_FAIL(ret) && OB_UNLIKELY(!is_inited_)) {
+    reset();
   }
   return ret;
 }
 
 void ObFTParseHelper::reset()
 {
-  if (OB_NOT_NULL(cached_iter_) && OB_NOT_NULL(parser_desc_)) {
-    parser_desc_->free_token_iter(&cached_param_, cached_iter_);
-  }
-  cached_param_.reset();
-  cached_iter_ = nullptr;
   parser_desc_ = nullptr;
   allocator_ = nullptr;
   add_word_flag_.clear();
@@ -443,8 +391,7 @@ int ObFTParseHelper::segment(
     const char *fulltext,
     const int64_t fulltext_len,
     int64_t &doc_length,
-    ObFTWordMap &words,
-    common::ObIAllocator *word_allocator) const
+    ObFTWordMap &words) const
 {
   int ret = OB_SUCCESS;
   const ObCharsetInfo *cs = nullptr;
@@ -459,27 +406,18 @@ int ObFTParseHelper::segment(
     ret = OB_ERR_UNEXPECTED;
   } else {
     words.reuse();
-    common::ObIAllocator *add_word_allocator = nullptr == word_allocator ? allocator_ : word_allocator;
-    if (OB_ISNULL(add_word_allocator)) {
-      ret = OB_ERR_UNEXPECTED;
+    ObAddWord add_word(parser_property_, meta, add_word_flag_, *allocator_, words);
+    if (OB_FAIL(segment(
+                    parser_property_,
+                    parser_name_.get_parser_version(),
+                    parser_desc_,
+                    cs,
+                    fulltext,
+                    fulltext_len,
+                    *allocator_,
+                    add_word))) {
     } else {
-      ObAddWord add_word(parser_property_, meta, add_word_flag_, *add_word_allocator, words);
-      if (parser_name_.is_ik()) {
-        if (OB_FAIL(segment_with_cache(cs, fulltext, fulltext_len, add_word))) {
-        }
-      } else if (OB_FAIL(segment(
-                             parser_property_,
-                             parser_name_.get_parser_version(),
-                             parser_desc_,
-                             cs,
-                             fulltext,
-                             fulltext_len,
-                             *add_word_allocator,
-                             add_word))) {
-      }
-      if (OB_SUCC(ret)) {
-        doc_length = add_word.get_add_word_count();
-      }
+      doc_length = add_word.get_add_word_count();
     }
   }
   LOG_DEBUG("ft parse segment", K(ret), K(type), K(add_word_flag_), K(parser_name_),
@@ -570,27 +508,91 @@ int ObFTParseHelper::make_token_array_json(
     common::ObIJsonBase *&json_root)
 {
   int ret = OB_SUCCESS;
-  ObJsonArray *token_array = nullptr;
-  if (OB_UNLIKELY(OB_ISNULL(token_array = OB_NEWx(ObJsonArray, allocator_, allocator_)))) {
-    ret = OB_ALLOCATE_MEMORY_FAILED;
-  } else {
-    for (ObFTWordMap::const_iterator it = words.begin(); OB_SUCC(ret) && it != words.end(); ++it) {
-      ObString key = it->first.get_word().get_string();
-      ObJsonString *token = nullptr;
-      if (OB_UNLIKELY(OB_ISNULL(token = OB_NEWx(ObJsonString, allocator_, key)))) {
-        ret = OB_ALLOCATE_MEMORY_FAILED;
-      } else {
-        if (OB_FAIL(token_array->append(token))) {
-          OB_DELETEx(ObJsonString, allocator_, token);
-        } else {
-        }
-      }
-    } // for
+  const uint64_t count = words.size();
+  uint64_t children_size = 0;
+  uint64_t last_child_size = 0;
+  // Keep the existing hash iteration order and the last equivalent spelling.
+  // Size the flat string array before writing, without allocating JSON nodes.
+  for (ObFTWordMap::const_iterator it = words.begin(); it != words.end(); ++it) {
+    const ObString key = it->first.get_word().get_string();
+    last_child_size = sizeof(uint8_t) + serialization::encoded_length_vi64(key.length())
+        + key.length();
+    children_size += last_child_size;
   }
-  if (OB_SUCC(ret)) {
-    json_root = token_array;
+
+  // Match ObJsonArray::update_serialize_size() and the serializer's widening
+  // rule so JSON_STORAGE_SIZE remains identical, including width boundaries.
+  const uint8_t count_type = ObJsonVar::get_var_type(count);
+  const uint64_t count_size = ObJsonVar::get_var_size(count_type);
+  const uint64_t estimated_size = OB_JSON_BIN_OBJ_HEADER_LEN + count_size
+      + sizeof(uint32_t) + (sizeof(uint32_t) + sizeof(uint8_t)) * count + children_size;
+  const uint64_t offset_size = ObJsonVar::get_var_size(
+      ObJsonVar::get_var_type(estimated_size - last_child_size));
+  const uint64_t total_size = OB_JSON_BIN_OBJ_HEADER_LEN + count_size + sizeof(uint32_t)
+      + (offset_size + sizeof(uint8_t)) * count + children_size;
+  uint64_t obj_size = OB_JSON_BIN_OBJ_HEADER_LEN + count_size
+      + ObJsonVar::get_var_size(ObJsonVar::get_var_type(total_size))
+      + (offset_size + sizeof(uint8_t)) * count + children_size;
+  uint8_t size_type = ObJsonVar::get_var_type(obj_size);
+  uint64_t real_size = 0;
+  for (;;) {
+    const uint64_t width = ObJsonVar::get_var_size(size_type);
+    real_size = OB_JSON_BIN_OBJ_HEADER_LEN + count_size + width
+        + (width + sizeof(uint8_t)) * count + children_size;
+    const uint8_t real_type = ObJsonVar::get_var_type(real_size);
+    if (real_type <= size_type) {
+      break;
+    }
+    size_type = real_type;
+  }
+
+  ObJsonBuffer buffer(allocator_);
+  ObJsonBinMeta meta;
+  ObJsonBin *result = nullptr;
+  ObString bytes;
+  meta.set_type(ObJsonBin::get_array_vertype(), false);
+  meta.set_element_count(count);
+  meta.set_element_count_var_type(count_type);
+  meta.set_obj_size(real_size);
+  meta.set_obj_size_var_type(size_type);
+  meta.set_entry_var_type(size_type);
+  meta.set_is_continuous(true);
+  const uint64_t root_pos = sizeof(ObJsonBinDocHeader);
+  if (count > INT32_MAX || real_size > INT32_MAX - root_pos) {
+    ret = OB_SIZE_OVERFLOW;
+  } else if (OB_FAIL(meta.calc_entry_array())) {
+  } else if (OB_FAIL(buffer.reserve(root_pos + real_size))) {
+  } else if (OB_FAIL(ObJsonBin::add_doc_header_v0(buffer))) {
+  } else if (OB_FAIL(meta.to_header(buffer))) {
   } else {
-    OB_DELETEx(ObJsonArray, allocator_, token_array);
+    int index = 0;
+    for (ObFTWordMap::const_iterator it = words.begin(); OB_SUCC(ret) && it != words.end(); ++it) {
+      const ObString key = it->first.get_word().get_string();
+      if (OB_FAIL(ObJsonBinSerializer::set_value_entry(meta, buffer.ptr() + root_pos, index++,
+          buffer.length() - root_pos, static_cast<uint8_t>(ObJBVerType::J_STRING_V0)))) {
+      } else if (OB_FAIL(ObJsonBinSerializer::serialize_json_string(
+          ObJBVerType::J_STRING_V0, key, buffer))) {
+      }
+    }
+  }
+  if (OB_FAIL(ret)) {
+  } else if (buffer.length() != root_pos + real_size) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(ObJsonBin::set_doc_header_v0(buffer, buffer.length(), false))) {
+  } else if (OB_ISNULL(result = OB_NEWx(ObJsonBin, allocator_, allocator_))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else if (OB_FAIL(buffer.get_result_string(bytes))) {
+  } else if (OB_FAIL(result->reset(bytes, 0, nullptr))) {
+  } else {
+    // Detach from the local buffer; the caller's allocator owns the bytes
+    // through result packing, just as it owns the former JSON tree nodes.
+    json_root = result;
+  }
+  if (OB_FAIL(ret)) {
+    if (bytes.ptr() != nullptr) {
+      allocator_->free(bytes.ptr());
+    }
+    OB_DELETEx(ObJsonBin, allocator_, result);
   }
   return ret;
 }

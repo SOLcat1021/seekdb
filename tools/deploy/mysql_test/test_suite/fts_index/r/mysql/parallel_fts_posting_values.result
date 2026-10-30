@@ -1,0 +1,8 @@
+parallel_heap_posting_oracle
+word	docs	freq_sum	min_freq	max_freq
+alphamarker	16	136	1	16
+sharedmarker	16	16	1	1
+incorrect_postings
+0
+inconsistent_forward_postings
+0

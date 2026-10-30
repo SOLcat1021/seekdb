@@ -377,6 +377,13 @@ static int ob_strnncollsp_utf8mb4(const ObCharsetInfo *cs,
                        const unsigned char *dst, size_t dstlen,
                        bool diff_if_only_endspace_difference)
 {
+  // Repeated short sort keys need no Unicode decoding when all bytes match.
+  // Unequal strings still use the collation below (including case, padding and
+  // malformed-input handling). Bound the extra scan for nonmatching long keys.
+  if (srclen == dstlen && srclen <= 32
+      && (srclen == 0 || (src[0] == dst[0] && 0 == memcmp(src, dst, srclen)))) {
+    return 0;
+  }
   int res;
   ob_wc_t src_wc = 0, dst_wc = 0;
   const unsigned char *se= src + srclen, *te= dst + dstlen;
@@ -830,7 +837,21 @@ static void ob_hash_sort_utf8mb4(const ObCharsetInfo *cs, const unsigned char *s
   }
 
   if (NULL == hash_algo) {
-    while ((res= ob_mb_wc_utf8mb4(cs, &wc, (unsigned char*) src, (unsigned char*) end)) > 0) {
+    const bool default_ascii_weights =
+        uni_plane == &ob_unicase_default && !(cs->state & OB_CS_LOWER_SORT);
+    while (src < end) {
+      if (default_ascii_weights && *src < 0x80) {
+        // Default ASCII sort weights are uppercase ASCII. Keep both steps of
+        // the legacy hash recurrence, including the zero high weight byte.
+        const unsigned char c = *src++;
+        const unsigned int weight = c >= 'a' && c <= 'z' ? c - ('a' - 'A') : c;
+        ob_hash_add(n1, n2, weight);
+        ob_hash_add(n1, n2, 0);
+        continue;
+      }
+      if ((res = ob_mb_wc_utf8mb4(cs, &wc, src, end)) <= 0) {
+        break;
+      }
       ob_tosort_unicode(uni_plane, &wc, cs->state);
       ob_hash_add(n1, n2, (unsigned int) (wc & 0xFF));
       ob_hash_add(n1, n2, (unsigned int) (wc >> 8)  & 0xFF);

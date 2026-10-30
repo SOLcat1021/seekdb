@@ -328,6 +328,19 @@ int ObJsonBin::get_array_element(uint64_t index, ObIJsonBase *&value) const
   ObJsonBin *new_bin = NULL;
 
   if (OB_FAIL(check_valid_array_op(index))) {
+  } else if (is_seek_only_ && get_vertype() == ObJBVerType::J_ARRAY_V0
+      && index <= INT32_MAX && nullptr != value && value != this && value->is_bin()
+      && (nullptr == ctx_ || nullptr == ctx_->update_ctx_)) {
+    // A seek-only child does not need a parent stack. Resolve its entry from
+    // the parent's already parsed metadata, using the same typed child reset
+    // as element(). This avoids reconstructing and parsing the parent for
+    // every array member during traversal and serialization.
+    ObIAllocator *child_allocator = value->get_allocator();
+    new_bin = new (value) ObJsonBin(child_allocator);
+    if (OB_FAIL(get_value(static_cast<int>(index), *new_bin))) {
+    } else {
+      value = new_bin;
+    }
   } else if (OB_FAIL(create_new_binary(value, new_bin))) {
   } else if (! is_seek_only_ && OB_FAIL(new_bin->node_stack_.copy(this->node_stack_))) {
   } else if (OB_FAIL(new_bin->element(index))) {

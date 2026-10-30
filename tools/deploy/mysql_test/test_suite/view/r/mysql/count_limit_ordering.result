@@ -1,0 +1,115 @@
+SET NAMES utf8mb4;
+DROP TABLE IF EXISTS count_limit_values;
+CREATE TABLE count_limit_values(id INT PRIMARY KEY,k INT);
+INSERT INTO count_limit_values VALUES(1,8),(2,NULL),(3,2),(4,8),(5,NULL),(6,1),(7,5),(8,3);
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 0 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 1 OFFSET 0) q;
+COUNT(*)
+1
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3 OFFSET 0) q;
+COUNT(*)
+3
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 20 OFFSET 0) q;
+COUNT(*)
+8
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3 OFFSET 2) q;
+COUNT(*)
+3
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3 OFFSET 50) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 0 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 1 OFFSET 0) q;
+COUNT(*)
+1
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 3 OFFSET 0) q;
+COUNT(*)
+3
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 20 OFFSET 0) q;
+COUNT(*)
+8
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 3 OFFSET 2) q;
+COUNT(*)
+3
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT 3 OFFSET 50) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 0 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 1 OFFSET 0) q;
+COUNT(*)
+1
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 3 OFFSET 0) q;
+COUNT(*)
+3
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 20 OFFSET 0) q;
+COUNT(*)
+8
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 3 OFFSET 2) q;
+COUNT(*)
+3
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k DESC,id LIMIT 3 OFFSET 50) q;
+COUNT(*)
+0
+SELECT COUNT(k) FROM (SELECT k FROM count_limit_values ORDER BY id LIMIT 3) q;
+COUNT(k)
+2
+SELECT COUNT(DISTINCT k) FROM (SELECT k FROM count_limit_values ORDER BY id LIMIT 3) q;
+COUNT(DISTINCT k)
+2
+SELECT SUM(k),MIN(k),MAX(k) FROM (SELECT k FROM count_limit_values ORDER BY id DESC LIMIT 3) q;
+SUM(k)	MIN(k)	MAX(k)
+9	1	5
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id LIMIT 3) q WHERE k IS NULL;
+COUNT(*)
+1
+SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id LIMIT 3) q JOIN count_limit_values v ON q.k=v.k;
+COUNT(*)
+3
+SELECT k,COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3) q GROUP BY k ORDER BY k;
+k	COUNT(*)
+1	1
+3	1
+5	1
+SELECT COUNT(*) FROM (SELECT DISTINCT k FROM count_limit_values ORDER BY k LIMIT 3) q;
+COUNT(*)
+3
+SELECT COUNT(*) FROM (SELECT k,COUNT(*) c FROM count_limit_values GROUP BY k HAVING COUNT(*)>1 ORDER BY k LIMIT 1) q;
+COUNT(*)
+1
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_values ORDER BY RAND(42) LIMIT 3) q;
+COUNT(*)
+3
+SELECT id FROM (SELECT id,k FROM count_limit_values ORDER BY id DESC LIMIT 3) q ORDER BY id;
+id
+6
+7
+8
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_values ORDER BY (SELECT k FROM count_limit_values) LIMIT 3) q;
+ERROR 21000: Subquery returns more than 1 row
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_values ORDER BY JSON_EXTRACT(CONCAT('{"x":',id,'}'),'$[') LIMIT 3) q;
+ERROR 42000: Invalid JSON path expression.
+PREPARE count_limited FROM 'SELECT COUNT(*) FROM (SELECT id,k FROM count_limit_values ORDER BY k,id LIMIT ? OFFSET ?) q';
+SET @lim=0,@off=0;
+EXECUTE count_limited USING @lim,@off;
+COUNT(*)
+0
+SET @lim=3,@off=2;
+EXECUTE count_limited USING @lim,@off;
+COUNT(*)
+3
+SET @lim=20,@off=0;
+EXECUTE count_limited USING @lim,@off;
+COUNT(*)
+8
+SET @lim=3,@off=50;
+EXECUTE count_limited USING @lim,@off;
+COUNT(*)
+0
+DEALLOCATE PREPARE count_limited;
+DROP TABLE count_limit_values;

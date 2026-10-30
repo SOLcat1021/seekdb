@@ -15,6 +15,7 @@
  */
 
 #define USING_LOG_PREFIX SQL_REWRITE
+#include "sql/rewrite/ob_transform_utils.h"
 #include "sql/rewrite/ob_transform_simplify_orderby.h"
 #include "sql/resolver/expr/ob_raw_expr_util.h"
 using namespace oceanbase::sql;
@@ -101,7 +102,7 @@ int ObTransformSimplifyOrderby::remove_order_by_for_subquery(ObDMLStmt *stmt, bo
   return ret;
 }
 
-int ObTransformSimplifyOrderby::remove_order_by_for_view_stmt(ObDMLStmt *stmt, bool &trans_happened, bool &force_serial_set_order)
+int ObTransformSimplifyOrderby::remove_order_by_for_view_stmt(ObDMLStmt *stmt, bool &trans_happened, bool &force_serial_set_order, const bool count_limited_only)
 {
   int ret = OB_SUCCESS;
   bool can_remove = false;
@@ -138,15 +139,89 @@ int ObTransformSimplifyOrderby::remove_order_by_for_view_stmt(ObDMLStmt *stmt, b
       } else if (1 == table_items.count()) {
         if (stmt->is_select_stmt()) {
           select_stmt = static_cast<ObSelectStmt*>(stmt);
-          if ((select_stmt->has_group_by() || select_stmt->has_distinct() ||
-                     select_stmt->has_order_by()) && !view_stmt->has_limit() &&
-                     view_stmt->has_order_by() &&
+          // A sole COUNT(*) observes the number of rows, not which rows an
+          // ordinary LIMIT/OFFSET selects. Preserve the limit but avoid sorting
+          // a flat, deterministic view just to discard every selected value.
+          const ObAggFunRawExpr *count_expr = 1 == select_stmt->get_aggr_item_size()
+              ? select_stmt->get_aggr_item(0) : nullptr;
+          const TableItem *input = 1 == view_stmt->get_table_size()
+              ? view_stmt->get_table_item(0) : nullptr;
+          bool count_limited_view = table_item->is_generated_table()
+              && select_stmt->is_single_table_stmt() && select_stmt->is_scala_group_by()
+              && !select_stmt->is_set_stmt() && !select_stmt->has_distinct()
+              && !select_stmt->has_having() && !select_stmt->has_limit() && !select_stmt->has_order_by()
+              && !select_stmt->has_for_update() && !select_stmt->is_contains_assignment()
+              && select_stmt->get_condition_exprs().empty() && select_stmt->get_semi_infos().empty()
+              && 0 == select_stmt->get_subquery_expr_size()
+              && 1 == select_stmt->get_select_item_size() && nullptr != count_expr
+              && select_stmt->get_select_item(0).expr_ == count_expr
+              && T_FUN_COUNT == count_expr->get_expr_type() && !count_expr->is_param_distinct()
+              && 0 == count_expr->get_real_param_count()
+              && view_stmt->is_single_table_stmt() && nullptr != input && input->is_basic_table()
+              && view_stmt->has_limit() && !view_stmt->is_fetch_with_ties()
+              && nullptr == view_stmt->get_limit_percent_expr()
+              && !view_stmt->has_group_by() && !view_stmt->has_distinct()
+              && !view_stmt->has_having() && !view_stmt->has_window_function()
+              && !view_stmt->has_for_update() && !view_stmt->has_recursive_cte()
+              && 0 == view_stmt->get_subquery_expr_size();
+          // For fulltext views, require one unboosted natural-language
+          // membership predicate. Residual base-table filters can still need
+          // lookup/scoring and must retain their original plan choices.
+          if (count_limited_view && !view_stmt->get_match_exprs().empty()) {
+            count_limited_view = 1 == view_stmt->get_match_exprs().count()
+                && 1 == view_stmt->get_condition_exprs().count();
+            if (count_limited_view) {
+              const ObMatchFunRawExpr *match = view_stmt->get_match_exprs().at(0);
+              count_limited_view = nullptr != match && !match->is_es_match()
+                  && NATURAL_LANGUAGE_MODE == match->get_mode_flag() && match->get_columns_boosts().empty();
+            }
+          }
+          // Do not suppress errors or effects from arbitrary discarded
+          // projections/order expressions. MATCH is safe here only when the
+          // same expression must already be evaluated as a WHERE predicate.
+          for (int64_t j = 0; count_limited_view && j < view_stmt->get_select_item_size(); ++j) {
+            const ObRawExpr *expr = view_stmt->get_select_item(j).expr_;
+            count_limited_view = nullptr != expr
+                && (expr->is_column_ref_expr() || expr->is_const_raw_expr());
+          }
+          for (int64_t j = 0; count_limited_view && j < view_stmt->get_order_item_size(); ++j) {
+            const ObRawExpr *expr = view_stmt->get_order_item(j).expr_;
+            bool safe = nullptr != expr && (expr->is_column_ref_expr() || expr->is_const_raw_expr());
+            for (int64_t k = 0; !safe && nullptr != expr && T_FUN_MATCH_AGAINST == expr->get_expr_type()
+                && k < view_stmt->get_condition_exprs().count(); ++k) {
+              const ObRawExpr *condition = view_stmt->get_condition_exprs().at(k);
+              safe = condition == expr || (nullptr != condition && T_OP_BOOL == condition->get_expr_type()
+                  && 1 == condition->get_param_count() && condition->get_param_expr(0) == expr);
+            }
+            count_limited_view = safe;
+          }
+          if (count_limited_view && OB_FAIL(view_stmt->check_relation_exprs_deterministic(count_limited_view))) {
+          } else if (((!count_limited_only && (select_stmt->has_group_by() || select_stmt->has_distinct() ||
+                     select_stmt->has_order_by()) && !view_stmt->has_limit()) || count_limited_view)
+                     && view_stmt->has_order_by() &&
                      OB_FAIL(do_remove_stmt_order_by(view_stmt, happened))) {
           } else {
             trans_happened |= happened;
           }
+          if (OB_SUCC(ret) && count_limited_view && happened && !view_stmt->has_order_by()) {
+            // COUNT(*) has no use for projected values either. Use the normal
+            // view-pruning utility so parent column references stay consistent
+            // and an all-pruned view receives its standard constant output.
+            ObSqlBitSet<> removed_idxs;
+            for (int64_t j = 0; OB_SUCC(ret) && j < view_stmt->get_select_item_size(); ++j) {
+              if (nullptr == select_stmt->get_column_item_by_id(table_item->table_id_, j + OB_APP_MIN_COLUMN_ID)) {
+                ret = removed_idxs.add_member(j);
+              }
+            }
+            if (OB_SUCC(ret) && !removed_idxs.is_empty()) {
+              if (OB_FAIL(ObTransformUtils::remove_select_items(
+                      ctx_, table_item->table_id_, *view_stmt, *select_stmt, removed_idxs))) {
+              } else if (OB_FAIL(view_stmt->formalize_stmt(ctx_->session_info_))) {
+              }
+            }
+          }
         }
-      } else if (!view_stmt->has_limit() && view_stmt->has_order_by() &&
+      } else if (!count_limited_only && !view_stmt->has_limit() && view_stmt->has_order_by() &&
                  OB_FAIL(do_remove_stmt_order_by(view_stmt, happened))) {
       } else {
         trans_happened |= happened;

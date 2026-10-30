@@ -1,0 +1,67 @@
+SET NAMES utf8mb4;
+DROP TABLE IF EXISTS count_limit_fts;
+CREATE TABLE count_limit_fts(id INT PRIMARY KEY,body TEXT,FULLTEXT INDEX ft(body) WITH PARSER beng);
+INSERT INTO count_limit_fts VALUES(1,'database database audit'),(2,'audit'),(3,'database performance'),(4,'other'),(5,''),(6,NULL),(7,'performance audit audit');
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 0 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 1 OFFSET 0) q;
+COUNT(*)
+1
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 3 OFFSET 0) q;
+COUNT(*)
+3
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 20 OFFSET 0) q;
+COUNT(*)
+4
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 2 OFFSET 2) q;
+COUNT(*)
+2
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 3 OFFSET 50) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 0 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 1 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 3 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 20 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 2 OFFSET 2) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 3 OFFSET 50) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 0 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 1 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 3 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 20 OFFSET 0) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 2 OFFSET 2) q;
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 3 OFFSET 50) q;
+COUNT(*)
+0
+SELECT id,ROUND(MATCH(body) AGAINST('database audit'),6) score FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') ORDER BY score DESC,id LIMIT 3;
+id	score
+1	1.702048
+3	1.172031
+7	0.430266
+SELECT ROUND(SUM(score),6) FROM (SELECT MATCH(body) AGAINST('database audit') score FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') ORDER BY score DESC LIMIT 3) q;
+ROUND(SUM(score),6)
+3.271843
+DROP TABLE count_limit_fts;

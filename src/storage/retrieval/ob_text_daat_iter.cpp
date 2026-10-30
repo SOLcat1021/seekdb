@@ -91,23 +91,31 @@ int ObTextDaaTIter::do_one_merge_round(int64_t &count)
     return ObSRDaaTIterImpl::do_one_merge_round(count);
   }
   int ret = OB_SUCCESS;
+  // These fixed arrays are prepared during init and are not resized by a
+  // merge round. Cache their storage once instead of repeated virtual at()
+  // calls for each posting. The general merger remains unchanged.
+  const int64_t dimension_count = dim_iters_->count();
+  const ObDatum **ids = iter_domain_ids_.get_data();
+  int64_t *next_indices = next_round_iter_idxes_.get_data();
   for (int64_t i = 0; OB_SUCC(ret) && i < next_round_cnt_; ++i) {
-    const int64_t idx = next_round_iter_idxes_[i];
-    ObISRDaaTDimIter *dim = dim_iters_->at(idx);
+    const int64_t idx = next_indices[i];
+    // Text DaaT owns this concrete iterator type, as in reset()/reuse().
+    ObTextRetrievalDaaTTokenIter *dim =
+        static_cast<ObTextRetrievalDaaTTokenIter *>(dim_iters_->at(idx));
     if (OB_ISNULL(dim)) {
       ret = OB_ERR_UNEXPECTED;
     } else if (OB_FAIL(dim->get_next_row())) {
       if (OB_ITER_END == ret) {
-        iter_domain_ids_[idx] = nullptr;
+        ids[idx] = nullptr;
         ret = OB_SUCCESS;
       }
-    } else if (OB_FAIL(dim->get_curr_id(iter_domain_ids_[idx]))) {
+    } else if (OB_FAIL(dim->get_curr_id(ids[idx]))) {
     }
   }
   next_round_cnt_ = 0;
   ObSRMergeItem minimum;
-  for (int64_t i = 0; OB_SUCC(ret) && i < dim_iters_->count(); ++i) {
-    if (nullptr == iter_domain_ids_[i]) {
+  for (int64_t i = 0; OB_SUCC(ret) && i < dimension_count; ++i) {
+    if (nullptr == ids[i]) {
       continue;
     }
     ObSRMergeItem candidate;
@@ -117,15 +125,15 @@ int ObTextDaaTIter::do_one_merge_round(int64_t &count)
     } else if (cmp < 0) {
       minimum = candidate;
       next_round_cnt_ = 0;
-      next_round_iter_idxes_[next_round_cnt_++] = i;
+      next_indices[next_round_cnt_++] = i;
     } else if (cmp == 0) {
-      next_round_iter_idxes_[next_round_cnt_++] = i;
+      next_indices[next_round_cnt_++] = i;
     }
   }
   if (OB_SUCC(ret)) {
     if (minimum.iter_idx_ < 0) {
       ret = OB_ITER_END;
-    } else if (OB_FAIL(cache_result(count, *iter_domain_ids_[minimum.iter_idx_], 1.0))) {
+    } else if (OB_FAIL(cache_result(count, *ids[minimum.iter_idx_], 1.0))) {
     }
   }
   return ret;

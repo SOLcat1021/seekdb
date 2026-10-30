@@ -1,0 +1,87 @@
+SET NAMES utf8mb4;
+SELECT TOKENIZE('DATABASE database Database audit audit THE the','beng') AS tokens;
+tokens
+["audit", "database"]
+SELECT TOKENIZE('数据库 数据库 数据库 全文索引','ik') AS tokens;
+tokens
+["数据库", "全文索引"]
+SELECT TOKENIZE('A a Ａ Ä ä 数据库 数据库' COLLATE utf8mb4_bin,'space') AS tokens;
+tokens
+["数据库"]
+SELECT TOKENIZE('abc abc abc','ngram') AS tokens;
+tokens
+["ab", "bc"]
+DROP TABLE IF EXISTS wordmap_membership_docs;
+CREATE TABLE wordmap_membership_docs(id INT PRIMARY KEY, body TEXT,
+FULLTEXT INDEX ft(body) WITH PARSER beng);
+INSERT INTO wordmap_membership_docs VALUES
+(1,'database database audit'),(2,'performance audit'),(3,'unrelated'),
+(4,''),(5,NULL),(6,'the and an');
+SELECT COUNT(*) FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('database audit');
+COUNT(*)
+2
+SELECT id FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('database audit') ORDER BY id;
+id
+1
+2
+SELECT COUNT(*) FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('missing');
+COUNT(*)
+0
+SELECT COUNT(*) FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('');
+COUNT(*)
+0
+SELECT COUNT(*) FROM wordmap_membership_docs WHERE MATCH(body) AGAINST(NULL);
+COUNT(*)
+0
+SELECT COUNT(*) FROM (SELECT id FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('audit') LIMIT 1) t;
+COUNT(*)
+1
+SELECT id, ROUND(MATCH(body) AGAINST('database audit'),6) AS score
+FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('database audit') ORDER BY id;
+id	score
+1	3.048103
+2	0.873737
+SELECT id FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('database audit')
+ORDER BY MATCH(body) AGAINST('database audit') DESC,id LIMIT 1;
+id
+1
+SELECT COUNT(*) FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('database audit')>0.5;
+COUNT(*)
+2
+PREPARE membership_stmt FROM 'SELECT COUNT(*) FROM wordmap_membership_docs WHERE MATCH(body) AGAINST(?)';
+SET @q='database audit';
+EXECUTE membership_stmt USING @q;
+COUNT(*)
+2
+SET @q='missing';
+EXECUTE membership_stmt USING @q;
+COUNT(*)
+0
+SET @q=NULL;
+EXECUTE membership_stmt USING @q;
+COUNT(*)
+0
+DEALLOCATE PREPARE membership_stmt;
+SET @long_query='database audit missingtoken0000 missingtoken0001 missingtoken0002 missingtoken0003 missingtoken0004 missingtoken0005 missingtoken0006 missingtoken0007 missingtoken0008 missingtoken0009 missingtoken0010 missingtoken0011 missingtoken0012 missingtoken0013 missingtoken0014 missingtoken0015 missingtoken0016 missingtoken0017 missingtoken0018 missingtoken0019 missingtoken0020 missingtoken0021 missingtoken0022 missingtoken0023 missingtoken0024 missingtoken0025 missingtoken0026 missingtoken0027 missingtoken0028 missingtoken0029 missingtoken0030 missingtoken0031 missingtoken0032 missingtoken0033 missingtoken0034 missingtoken0035 missingtoken0036 missingtoken0037 missingtoken0038 missingtoken0039 missingtoken0040 missingtoken0041 missingtoken0042 missingtoken0043 missingtoken0044 missingtoken0045 missingtoken0046 missingtoken0047 missingtoken0048 missingtoken0049 missingtoken0050 missingtoken0051 missingtoken0052 missingtoken0053 missingtoken0054 missingtoken0055 missingtoken0056 missingtoken0057 missingtoken0058 missingtoken0059 missingtoken0060 missingtoken0061 missingtoken0062 missingtoken0063 missingtoken0064 missingtoken0065 missingtoken0066 missingtoken0067 missingtoken0068 missingtoken0069 missingtoken0070 missingtoken0071 missingtoken0072 missingtoken0073 missingtoken0074 missingtoken0075 missingtoken0076 missingtoken0077 missingtoken0078 missingtoken0079 missingtoken0080 missingtoken0081 missingtoken0082 missingtoken0083 missingtoken0084 missingtoken0085 missingtoken0086 missingtoken0087 missingtoken0088 missingtoken0089 missingtoken0090 missingtoken0091 missingtoken0092 missingtoken0093 missingtoken0094 missingtoken0095 missingtoken0096 missingtoken0097 missingtoken0098 missingtoken0099 missingtoken0100 missingtoken0101 missingtoken0102 missingtoken0103 missingtoken0104 missingtoken0105 missingtoken0106 missingtoken0107 missingtoken0108 missingtoken0109 missingtoken0110 missingtoken0111 missingtoken0112 missingtoken0113 missingtoken0114 missingtoken0115 missingtoken0116 missingtoken0117 missingtoken0118 missingtoken0119 missingtoken0120 missingtoken0121 missingtoken0122 missingtoken0123 missingtoken0124 missingtoken0125 missingtoken0126 missingtoken0127 missingtoken0128 missingtoken0129 missingtoken0130 missingtoken0131 missingtoken0132 missingtoken0133 missingtoken0134 missingtoken0135 missingtoken0136 missingtoken0137 missingtoken0138 missingtoken0139 missingtoken0140 missingtoken0141 missingtoken0142 missingtoken0143 missingtoken0144 missingtoken0145 missingtoken0146 missingtoken0147 missingtoken0148 missingtoken0149 missingtoken0150 missingtoken0151 missingtoken0152 missingtoken0153 missingtoken0154 missingtoken0155 missingtoken0156 missingtoken0157 missingtoken0158 missingtoken0159 missingtoken0160 missingtoken0161 missingtoken0162 missingtoken0163 missingtoken0164 missingtoken0165 missingtoken0166 missingtoken0167 missingtoken0168 missingtoken0169 missingtoken0170 missingtoken0171 missingtoken0172 missingtoken0173 missingtoken0174 missingtoken0175 missingtoken0176 missingtoken0177 missingtoken0178 missingtoken0179 missingtoken0180 missingtoken0181 missingtoken0182 missingtoken0183 missingtoken0184 missingtoken0185 missingtoken0186 missingtoken0187 missingtoken0188 missingtoken0189 missingtoken0190 missingtoken0191 missingtoken0192 missingtoken0193 missingtoken0194 missingtoken0195 missingtoken0196 missingtoken0197 missingtoken0198 missingtoken0199 missingtoken0200 missingtoken0201 missingtoken0202 missingtoken0203 missingtoken0204 missingtoken0205 missingtoken0206 missingtoken0207 missingtoken0208 missingtoken0209 missingtoken0210 missingtoken0211 missingtoken0212 missingtoken0213 missingtoken0214 missingtoken0215 missingtoken0216 missingtoken0217 missingtoken0218 missingtoken0219 missingtoken0220 missingtoken0221 missingtoken0222 missingtoken0223 missingtoken0224 missingtoken0225 missingtoken0226 missingtoken0227 missingtoken0228 missingtoken0229 missingtoken0230 missingtoken0231 missingtoken0232 missingtoken0233 missingtoken0234 missingtoken0235 missingtoken0236 missingtoken0237 missingtoken0238 missingtoken0239 missingtoken0240 missingtoken0241 missingtoken0242 missingtoken0243 missingtoken0244 missingtoken0245 missingtoken0246 missingtoken0247 missingtoken0248 missingtoken0249 missingtoken0250 missingtoken0251 missingtoken0252 missingtoken0253 missingtoken0254 missingtoken0255 missingtoken0256';
+PREPARE long_membership FROM 'SELECT COUNT(*) FROM wordmap_membership_docs WHERE MATCH(body) AGAINST(?)';
+EXECUTE long_membership USING @long_query;
+COUNT(*)
+2
+DEALLOCATE PREPARE long_membership;
+START TRANSACTION;
+UPDATE wordmap_membership_docs SET body='performance performance' WHERE id=1;
+DELETE FROM wordmap_membership_docs WHERE id=2;
+SELECT COUNT(*) FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('database audit');
+COUNT(*)
+0
+ROLLBACK;
+SELECT COUNT(*) FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('database audit');
+COUNT(*)
+2
+UPDATE wordmap_membership_docs SET body='performance performance' WHERE id=1;
+DELETE FROM wordmap_membership_docs WHERE id=2;
+INSERT INTO wordmap_membership_docs VALUES(7,'database audit audit');
+SELECT id FROM wordmap_membership_docs WHERE MATCH(body) AGAINST('database audit') ORDER BY id;
+id
+7
+DROP TABLE wordmap_membership_docs;

@@ -1,0 +1,28 @@
+--disable_query_log
+--disable_warnings
+CREATE DATABASE IF NOT EXISTS kernel_fts_regression;
+USE kernel_fts_regression;
+DROP TABLE IF EXISTS r13_parallel_posting;
+--enable_warnings
+CREATE TABLE r13_parallel_posting(id INT, body TEXT);
+INSERT INTO r13_parallel_posting
+SELECT a.n+4*b.n, CONCAT(REPEAT('alphamarker ',a.n+4*b.n+1),'sharedmarker')
+FROM (SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3) a
+CROSS JOIN (SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3) b;
+SET _force_parallel_ddl_dop=12;
+ALTER TABLE r13_parallel_posting ADD FULLTEXT INDEX ft(body) WITH PARSER beng;
+SET _force_parallel_ddl_dop=1;
+SET ob_enable_index_direct_select=ON;
+let $data_id = query_get_value(SELECT A.table_id FROM oceanbase.__all_table A JOIN oceanbase.__all_database B ON A.database_id=B.database_id WHERE B.database_name='kernel_fts_regression' AND A.table_name='r13_parallel_posting', table_id, 1);
+let $idx_name = query_get_value(SELECT table_name FROM oceanbase.__all_table WHERE data_table_id=$data_id AND index_type=13, table_name, 1);
+let $doc_name = query_get_value(SELECT table_name FROM oceanbase.__all_table WHERE data_table_id=$data_id AND index_type=14, table_name, 1);
+let $word = query_get_value(SELECT column_name FROM oceanbase.__all_column WHERE table_id=$data_id AND column_name LIKE '__word_segment_%', column_name, 1);
+let $freq = query_get_value(SELECT column_name FROM oceanbase.__all_column WHERE table_id=$data_id AND column_name LIKE '__word_count_%', column_name, 1);
+let $len = query_get_value(SELECT column_name FROM oceanbase.__all_column WHERE table_id=$data_id AND column_name LIKE '__doc_length_%', column_name, 1);
+--echo parallel_heap_posting_oracle
+eval SELECT /*+opt_param('hidden_column_visible','true')*/ a.$word AS word,COUNT(*) AS docs,SUM(a.$freq) AS freq_sum,MIN(a.$freq) AS min_freq,MAX(a.$freq) AS max_freq FROM $idx_name a GROUP BY a.$word ORDER BY a.$word;
+eval SELECT /*+opt_param('hidden_column_visible','true')*/ COUNT(*) AS incorrect_postings FROM $idx_name a JOIN r13_parallel_posting b ON a.__pk_increment=b.__pk_increment WHERE a.$freq <> IF(a.$word='alphamarker',b.id+1,1) OR a.$len <> b.id+2;
+eval SELECT /*+opt_param('hidden_column_visible','true')*/ COUNT(*) AS inconsistent_forward_postings FROM $idx_name a JOIN $doc_name b ON a.__pk_increment=b.__pk_increment AND a.$word=b.$word WHERE a.$freq<>b.$freq OR a.$len<>b.$len;
+DROP TABLE r13_parallel_posting;
+SET ob_enable_index_direct_select=OFF;
+--enable_query_log

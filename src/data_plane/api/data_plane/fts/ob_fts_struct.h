@@ -53,7 +53,16 @@ private:
 
 // Owned by one synchronous TOKENIZE or domain-index row generation call.
 // Do not share this scratch word-frequency map between workers.
-typedef common::hash::ObHashMap<ObFTWord, int64_t, common::hash::NoPthreadDefendMode> ObFTWordMap;
+// The map's node allocator has the same single-owner lifetime as its buckets.
+// Keep its existing block layout, reserve policy and destruction semantics,
+// without taking a separate spin mutex for each local node allocation/free.
+using FTWordNode = common::hash::HashMapTypes<ObFTWord, int64_t>::AllocType;
+using FTWordNodeAllocator = common::hash::SimpleAllocer<FTWordNode,
+    common::hash::NodeNumTraits<FTWordNode>::NODE_NUM,
+    common::hash::NoPthreadDefendMode>;
+typedef common::hash::ObHashMap<ObFTWord, int64_t,
+    common::hash::NoPthreadDefendMode, common::hash::hash_func<ObFTWord>,
+    common::hash::equal_to<ObFTWord>, FTWordNodeAllocator> ObFTWordMap;
 
 class ObAddWordFlag final
 {

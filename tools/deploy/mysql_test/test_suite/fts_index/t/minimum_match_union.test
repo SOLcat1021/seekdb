@@ -1,0 +1,24 @@
+# The unscored union shortcut must preserve minimum-should-match.
+SET NAMES utf8mb4;
+--disable_warnings
+DROP TABLE IF EXISTS minimum_match_union;
+--enable_warnings
+CREATE TABLE minimum_match_union(id INT PRIMARY KEY,body TEXT,FULLTEXT INDEX ft(body) WITH PARSER beng);
+INSERT INTO minimum_match_union VALUES(1,'alpha'),(2,'bravo'),(3,'alpha bravo'),(4,'bravo charlie'),(5,'alpha bravo charlie'),(6,NULL),(7,'');
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha bravo charlie','operator=or;minimum_should_match=1') ORDER BY score DESC,id;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha bravo charlie','operator=or;minimum_should_match=1') ORDER BY score DESC,id LIMIT 2;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha alpha bravo','operator=or;minimum_should_match=1') ORDER BY score DESC,id;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha alpha bravo','operator=or;minimum_should_match=1') ORDER BY score DESC,id LIMIT 2;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha bravo charlie','operator=or;minimum_should_match=2') ORDER BY score DESC,id;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha bravo charlie','operator=or;minimum_should_match=2') ORDER BY score DESC,id LIMIT 2;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha alpha bravo','operator=or;minimum_should_match=2') ORDER BY score DESC,id;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha alpha bravo','operator=or;minimum_should_match=2') ORDER BY score DESC,id LIMIT 2;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha bravo charlie','operator=or;minimum_should_match=3') ORDER BY score DESC,id;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha bravo charlie','operator=or;minimum_should_match=3') ORDER BY score DESC,id LIMIT 2;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha alpha bravo','operator=or;minimum_should_match=3') ORDER BY score DESC,id;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha alpha bravo','operator=or;minimum_should_match=3') ORDER BY score DESC,id LIMIT 2;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha bravo charlie','operator=or;minimum_should_match=4') ORDER BY score DESC,id;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha bravo charlie','operator=or;minimum_should_match=4') ORDER BY score DESC,id LIMIT 2;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha alpha bravo','operator=or;minimum_should_match=4') ORDER BY score DESC,id;
+SELECT id,SCORE() score FROM minimum_match_union WHERE MATCH(body^1,'alpha alpha bravo','operator=or;minimum_should_match=4') ORDER BY score DESC,id LIMIT 2;
+DROP TABLE minimum_match_union;

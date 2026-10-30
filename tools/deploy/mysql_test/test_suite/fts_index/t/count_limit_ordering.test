@@ -1,0 +1,28 @@
+# COUNT(*) observes cardinality, other consumers must preserve the limited subset.
+SET NAMES utf8mb4;
+--disable_warnings
+DROP TABLE IF EXISTS count_limit_fts;
+--enable_warnings
+CREATE TABLE count_limit_fts(id INT PRIMARY KEY,body TEXT,FULLTEXT INDEX ft(body) WITH PARSER beng);
+INSERT INTO count_limit_fts VALUES(1,'database database audit'),(2,'audit'),(3,'database performance'),(4,'other'),(5,''),(6,NULL),(7,'performance audit audit');
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 0 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 1 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 3 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 20 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 2 OFFSET 2) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') LIMIT 3 OFFSET 50) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 0 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 1 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 3 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 20 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 2 OFFSET 2) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('missing') LIMIT 3 OFFSET 50) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 0 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 1 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 3 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 20 OFFSET 0) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 2 OFFSET 2) q;
+SELECT COUNT(*) FROM (SELECT id FROM count_limit_fts WHERE MATCH(body) AGAINST('') LIMIT 3 OFFSET 50) q;
+SELECT id,ROUND(MATCH(body) AGAINST('database audit'),6) score FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') ORDER BY score DESC,id LIMIT 3;
+SELECT ROUND(SUM(score),6) FROM (SELECT MATCH(body) AGAINST('database audit') score FROM count_limit_fts WHERE MATCH(body) AGAINST('database audit') ORDER BY score DESC LIMIT 3) q;
+DROP TABLE count_limit_fts;

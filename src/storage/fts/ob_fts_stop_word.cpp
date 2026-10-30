@@ -307,7 +307,10 @@ int ObAddWord::groupby_word(const ObFTWord &word, const int64_t word_freq)
   } else {
     // Keep the existing first-occurrence count of one. Subsequent occurrences
     // add the parser's frequency without a second hash and bucket traversal.
-    auto add_frequency = [word_freq](common::hash::HashMapPair<ObFTWord, int64_t> &entry) {
+      auto add_frequency = [&word, word_freq](common::hash::HashMapPair<ObFTWord, int64_t> &entry) {
+        // The original overwrite operation replaced the key as well as its
+        // count. Preserve the last equivalent spelling without a second lookup.
+        entry.first = word;
       entry.second += word_freq;
     };
     if (OB_FAIL(word_map_.set_or_update(word, 1/*word count*/, add_frequency))) {

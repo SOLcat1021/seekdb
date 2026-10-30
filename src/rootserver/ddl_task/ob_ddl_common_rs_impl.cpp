@@ -16,6 +16,7 @@
 #define USING_LOG_PREFIX SHARE
 
 #include "config_bridge.h"
+#include "lib/cpu/ob_cpu_topology.h"
 #include "share/rc/ob_server_runtime.h"
 #include "share/ob_server_struct.h"
 #include "share/ob_share_util.h"
@@ -343,7 +344,10 @@ int ObDDLTaskUtil::generate_build_replica_sql(const int64_t data_table_id,
     ObArray<int64_t> select_column_ids;
     ObArray<int64_t> order_column_ids;
     bool is_shadow_column = false;
-    const int64_t real_parallelism = ObDDLTaskUtil::get_real_parallelism(parallelism);
+    const int64_t requested_parallelism = ObDDLTaskUtil::get_real_parallelism(parallelism);
+    const int64_t real_parallelism = dest_table_schema->is_rowkey_doc_id()
+        ? MIN(requested_parallelism, MAX(1L, common::get_cpu_count()))
+        : requested_parallelism;
     const bool is_rowkey_doc_aux_table = dest_table_schema->is_rowkey_doc_id();
     uint64_t doc_id_col_id = OB_INVALID_ID;
     uint64_t ft_id_col_id = OB_INVALID_ID;

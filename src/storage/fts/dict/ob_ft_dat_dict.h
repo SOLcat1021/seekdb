@@ -94,7 +94,7 @@ public:
   size_t map_offset_ = 0;
   size_t base_offset_ = 0;
   size_t check_offset_ = 0;
-  // Optional process-local lookup table for canonical UTF-8 BMP characters.
+  // Optional, process-local lookup acceleration; never persisted in an index.
   size_t bmp_code_offset_ = 0;
 
   // use if offset is not 0, it means the data is in the data block
@@ -146,6 +146,7 @@ public:
 
 private:
   int expand();
+
   int encode(const ObString &word, ObFTWordCode &code, bool add);
 
 private:
@@ -178,8 +179,9 @@ public:
 
 private:
   ObFTDAT *dat_;
-  // Consecutive active prefixes often consult the same dictionary character.
-  // Keep the last exact lookup local to this reader without changing the DAT.
+  // Each ObFTCacheDict owns its reader within one parser invocation. Only the
+  // pinned DAT block is shared. Consecutive active prefixes often consume the
+  // same character, whose dictionary-local code can be reused here.
   mutable ObFTSingleWord cached_word_;
   mutable ObFTWordCode cached_code_;
   mutable int cached_ret_;

@@ -55,27 +55,12 @@ int ObBEngFTParser::get_next_token(
       } else {
         begin = 0;
         end = token.len_;
-        const bool utf8mb4 = cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI
-                             || cs_->number == CS_TYPE_UTF8MB4_BIN;
-        const auto is_ascii_alnum = [](const unsigned char c) {
-          return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-                 || (c >= '0' && c <= '9');
-        };
-        // The whitespace tokenizer already split punctuation. If both edges
-        // are ASCII alnum, the legacy trim cannot remove anything; avoid two
-        // charset-table calls while preserving the fallback for all other
-        // collations and malformed/non-ASCII edges.
-        if (utf8mb4 && is_ascii_alnum(static_cast<unsigned char>(token.ptr_[0]))
-            && is_ascii_alnum(static_cast<unsigned char>(token.ptr_[token.len_ - 1]))) {
-          found_alnum = true;
-        } else {
-          while (begin < end && !ob_isalnum(cs_, token.ptr_[begin])) {
-            ++begin;
-          }
-          found_alnum = begin < end;
-          while (end > begin && !ob_isalnum(cs_, token.ptr_[end - 1])) {
-            --end;
-          }
+        while (begin < end && !ob_isalnum(cs_, token.ptr_[begin])) {
+          ++begin;
+        }
+        found_alnum = begin < end;
+        while (end > begin && !ob_isalnum(cs_, token.ptr_[end - 1])) {
+          --end;
         }
       }
     }
@@ -86,20 +71,10 @@ int ObBEngFTParser::get_next_token(
       const char *source = token.ptr_ + begin;
       const uint32_t length = end - begin;
       bool ascii = cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI || cs_->number == CS_TYPE_UTF8MB4_BIN;
-      bool needs_lower = false;
       for (uint32_t i = 0; ascii && i < length; ++i) {
-        const unsigned char c = static_cast<unsigned char>(source[i]);
-        if (c >= 0x80) {
-          ascii = false;
-        } else if (c >= 'A' && c <= 'Z') {
-          needs_lower = true;
-        }
+        ascii = static_cast<unsigned char>(source[i]) < 0x80;
       }
-      if (ascii && !needs_lower) {
-        // The source is the input document, which remains alive for the
-        // whole segment call. Avoid an allocation when lowercasing is a no-op.
-        normalized.assign_ptr(source, length);
-      } else if (ascii) {
+      if (ascii) {
         char *buffer = static_cast<char *>(allocator_.alloc(length));
         if (OB_ISNULL(buffer)) {
           ret = OB_ALLOCATE_MEMORY_FAILED;

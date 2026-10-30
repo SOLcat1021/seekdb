@@ -1,0 +1,43 @@
+# Binary suffix normalization must retain first-key collation, both directions,
+# tertiary ties and NULL fallback. Independent integer keys define the oracle.
+--disable_query_log
+--disable_warnings
+DROP TABLE IF EXISTS r13_suffix_digits, r13_suffix_data, r13_suffix_seen, r13_suffix_expected;
+--enable_warnings
+CREATE TABLE r13_suffix_digits(n INT PRIMARY KEY);
+INSERT INTO r13_suffix_digits VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9);
+CREATE TABLE r13_suffix_data(id INT PRIMARY KEY,w VARCHAR(16) COLLATE utf8mb4_general_ci,d VARBINARY(32),k INT);
+INSERT INTO r13_suffix_data
+SELECT id,CASE MOD(id,8) WHEN 0 THEN 'aa' WHEN 1 THEN 'AA' WHEN 2 THEN 'bb' WHEN 3 THEN 'BB' WHEN 4 THEN 'cc' WHEN 5 THEN 'CC' WHEN 6 THEN 'dd' ELSE 'DD' END,UNHEX(CONCAT('A500FF8001007F55',LPAD(HEX(MOD(id*7919,4096)),16,'0'))),-id
+FROM (SELECT a.n+10*b.n+100*c.n+1000*d.n+10000*e.n id FROM r13_suffix_digits a,r13_suffix_digits b,r13_suffix_digits c,r13_suffix_digits d,r13_suffix_digits e WHERE e.n<2) t WHERE id<12000;
+CREATE TABLE r13_suffix_seen(seq INT AUTO_INCREMENT PRIMARY KEY,id INT NOT NULL);
+CREATE TABLE r13_suffix_expected(seq INT AUTO_INCREMENT PRIMARY KEY,id INT NOT NULL);
+INSERT INTO r13_suffix_seen(id) SELECT /*+ PARALLEL(1) */ id FROM r13_suffix_data ORDER BY w,d,k;
+INSERT INTO r13_suffix_expected(id) SELECT /*+ PARALLEL(1) */ id FROM r13_suffix_data ORDER BY FLOOR(MOD(id,8)/2),MOD(id*7919,4096),id DESC;
+--enable_query_log
+SELECT COUNT(*) AS rows_seen FROM r13_suffix_seen;
+SELECT COUNT(*) AS suffix_ascending_mismatches FROM r13_suffix_seen s JOIN r13_suffix_expected e USING(seq) WHERE s.id<>e.id;
+--disable_query_log
+TRUNCATE TABLE r13_suffix_seen;
+TRUNCATE TABLE r13_suffix_expected;
+INSERT INTO r13_suffix_seen(id) SELECT /*+ PARALLEL(1) */ id FROM r13_suffix_data ORDER BY w DESC,d DESC,k DESC;
+INSERT INTO r13_suffix_expected(id) SELECT /*+ PARALLEL(1) */ id FROM r13_suffix_data ORDER BY FLOOR(MOD(id,8)/2) DESC,MOD(id*7919,4096) DESC,id;
+--enable_query_log
+SELECT COUNT(*) AS suffix_descending_mismatches FROM r13_suffix_seen s JOIN r13_suffix_expected e USING(seq) WHERE s.id<>e.id;
+--disable_query_log
+TRUNCATE TABLE r13_suffix_seen;
+TRUNCATE TABLE r13_suffix_expected;
+INSERT INTO r13_suffix_seen(id) SELECT /*+ PARALLEL(1) */ id FROM r13_suffix_data ORDER BY w,d DESC,k;
+INSERT INTO r13_suffix_expected(id) SELECT /*+ PARALLEL(1) */ id FROM r13_suffix_data ORDER BY FLOOR(MOD(id,8)/2),MOD(id*7919,4096) DESC,id DESC;
+--enable_query_log
+SELECT COUNT(*) AS suffix_mixed_direction_mismatches FROM r13_suffix_seen s JOIN r13_suffix_expected e USING(seq) WHERE s.id<>e.id;
+--disable_query_log
+TRUNCATE TABLE r13_suffix_seen;
+TRUNCATE TABLE r13_suffix_expected;
+INSERT INTO r13_suffix_seen(id) SELECT /*+ PARALLEL(1) */ id FROM r13_suffix_data ORDER BY w,IF(MOD(id,11)=0,NULL,d),k;
+INSERT INTO r13_suffix_expected(id) SELECT /*+ PARALLEL(1) */ id FROM r13_suffix_data ORDER BY FLOOR(MOD(id,8)/2),CASE WHEN MOD(id,11)=0 THEN -1 ELSE MOD(id*7919,4096) END,id DESC;
+--enable_query_log
+SELECT COUNT(*) AS suffix_null_fallback_mismatches FROM r13_suffix_seen s JOIN r13_suffix_expected e USING(seq) WHERE s.id<>e.id;
+--disable_query_log
+DROP TABLE r13_suffix_digits, r13_suffix_data, r13_suffix_seen, r13_suffix_expected;
+--enable_query_log

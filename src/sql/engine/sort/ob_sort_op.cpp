@@ -216,8 +216,11 @@ int ObSortOp::process_sort()
         sort_row_count_++;
         OZ(sort_impl_.add_row(MY_SPEC.all_exprs_, need_dump));
         sort_impl_.collect_memory_dump_info(op_monitor_info_);
-        if (need_dump && MY_SPEC.prescan_enabled_) {
-          break;
+        if (OB_SUCC(ret) && need_dump && MY_SPEC.prescan_enabled_) {
+          OZ(sort_impl_.prepare_prescan(need_dump));
+          if (need_dump) {
+            break;
+          }
         }
       }
     }
@@ -256,6 +259,10 @@ int ObSortOp::process_sort_batch()
           OZ(sort_impl_.add_batch(MY_SPEC.all_exprs_, *input_brs->skip_,
                                   input_brs->size_, need_dump));
           sort_impl_.collect_memory_dump_info(op_monitor_info_);
+        }
+        if (OB_SUCC(ret) && need_dump && MY_SPEC.prescan_enabled_
+            && !input_brs->end_) {
+          OZ(sort_impl_.prepare_prescan(need_dump));
         }
         if (input_brs->end_ || (need_dump && MY_SPEC.prescan_enabled_)) {
           break;

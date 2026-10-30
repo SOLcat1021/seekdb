@@ -220,6 +220,15 @@ int ObGranuleUtil::split_block_granule(ObExecContext &exec_ctx,
     data_plane::ObParallelRangeTaskParams params(config::px_task_size() >> 10);
     params.parallelism_ = parallelism;
     params.expected_task_load_kb_ = tablet_size/1024;
+    if (tsc != nullptr && tsc->is_fts_ddl_ && parallelism > 1 && total_size > 0) {
+      // Text expansion is CPU work per token, not merely a byte scan. Use a
+      // smaller bounded scan grain so a small source can feed several token
+      // builders. The existing range splitter retains disjoint exact ranges.
+      const int64_t min_text_grain_kb = 256;
+      params.min_task_access_size_kb_ = MIN(params.min_task_access_size_kb_, min_text_grain_kb);
+      const int64_t target_grain_kb = MAX(min_text_grain_kb, total_size / parallelism / 4);
+      params.expected_task_load_kb_ = MIN(params.expected_task_load_kb_, target_grain_kb);
+    }
     if (OB_FAIL(data_plane::ObParallelRangeTaskPlanner::compute_total_task_count(
         params, total_size, esti_task_cnt_by_data_size))) {
     } else {

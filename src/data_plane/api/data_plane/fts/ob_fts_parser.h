@@ -124,11 +124,6 @@ public:
       int64_t &word_len,
       int64_t &char_cnt,
       int64_t &word_freq) = 0;
-  virtual int reset_for_reuse(const ObFTParserParam &param)
-  {
-    UNUSED(param);
-    return OB_NOT_SUPPORTED;
-  }
   DECLARE_PURE_VIRTUAL_TO_STRING;
 };
 

@@ -44,12 +44,15 @@ ObExprOperatorType ObFTIndexRowCache::FTS_INDEX_EXPR_TYPE[] = {T_FUN_SYS_WORD_SE
 ObExprOperatorType ObFTIndexRowCache::FTS_DOC_WORD_EXPR_TYPE[] = {T_FUN_SYS_DOC_ID, T_FUN_SYS_WORD_SEGMENT, T_FUN_SYS_WORD_COUNT, T_FUN_SYS_DOC_LENGTH};
 
 ObFTIndexRowCache::ObFTIndexRowCache()
-  : parser_allocator_(),
-    rows_(),
+  : row_(),
+    doc_id_(),
+    doc_length_(0),
     row_idx_(0),
     is_fts_index_aux_(true),
     helper_(),
     word_map_(),
+    word_iter_(),
+    release_word_map_(false),
     is_inited_(false)
 {
 }
@@ -70,8 +73,9 @@ int ObFTIndexRowCache::init(
   if (OB_UNLIKELY(is_inited_)) {
     ret = OB_INIT_TWICE;
   } else if (OB_FAIL(CURRENT_CONTEXT->CREATE_CONTEXT(merge_memctx_, param))) {
-  } else if (OB_FAIL(helper_.init(&parser_allocator_, parser_name, parser_properties))) {
+  } else if (OB_FAIL(helper_.init(&(merge_memctx_->get_arena_allocator()), parser_name, parser_properties))) {
   } else if (OB_FAIL(word_map_.get_local_allocer().reserve(256))) {
+  } else if (OB_FAIL(row_.init(4))) {
   } else {
     row_idx_ = 0;
     is_fts_index_aux_ = is_fts_index_aux;
@@ -91,18 +95,30 @@ int ObFTIndexRowCache::segment(const common::ObObjMeta &ft_obj_meta,
   if (OB_UNLIKELY(!is_inited_)) {
     ret = OB_NOT_INIT;
   } else if (FALSE_IT(reuse())) {
-  } else if (OB_FAIL(ObDASDomainUtils::generate_fulltext_word_rows(merge_memctx_->get_arena_allocator(),
-                                                                   &helper_,
-                                                                   ft_obj_meta,
-                                                                   doc_id_datum,
-                                                                   fulltext,
-                                                                   is_fts_index_aux_,
-                                                                   rows_,
-                                                                   fulltext.length() <= OB_MALLOC_NORMAL_BLOCK_SIZE ? &word_map_ : nullptr))) {
+  } else if (OB_UNLIKELY(!ft_obj_meta.is_valid()
+                        || CS_TYPE_INVALID == ft_obj_meta.get_collation_type()
+                        || CS_TYPE_PINYIN_BEGIN_MARK <= ft_obj_meta.get_collation_type())) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (fulltext.empty()) {
+    ret = OB_ITER_END;
   } else {
-    row_idx_ = 0;
+    const int64_t buckets = MIN(MAX(fulltext.length() / 10, 2), 997);
+    release_word_map_ = fulltext.length() > OB_MALLOC_NORMAL_BLOCK_SIZE;
+    if (word_map_.created() && word_map_.bucket_count() < buckets) {
+      word_map_.destroy();
+    }
+    if (!word_map_.created()
+        && OB_FAIL(word_map_.create(buckets, common::ObMemAttr("FTWordMap")))) {
+    } else if (OB_FAIL(helper_.segment(ft_obj_meta, fulltext.ptr(), fulltext.length(),
+                                     doc_length_, word_map_))) {
+    } else if (word_map_.size() == 0) {
+      ret = OB_ITER_END;
+    } else {
+      doc_id_ = doc_id_datum;
+      word_iter_ = word_map_.begin();
+    }
   }
-  LOG_TRACE("word segment", K(ret), K(row_idx_), K(rows_.count()), K(doc_id_datum), K(fulltext));
+  LOG_TRACE("word segment", K(ret), K(row_idx_), K(word_map_.size()), K(doc_id_datum), K(fulltext));
   return ret;
 }
 
@@ -111,25 +127,68 @@ int ObFTIndexRowCache::get_next_row(blocksstable::ObDatumRow *&row)
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = OB_NOT_INIT;
-  } else if (row_idx_ >= rows_.count()) {
+  } else if (row_idx_ >= word_map_.size()) {
     ret = OB_ITER_END;
   } else {
-    row = (rows_[row_idx_]);
+    // The scan immediately copies these four datum descriptors into its
+    // expressions before asking for the next row. Token bytes remain owned by
+    // this document's arena until the next segment() call.
+    const int64_t word_idx = is_fts_index_aux_ ? 0 : 1;
+    const int64_t doc_idx = is_fts_index_aux_ ? 1 : 0;
+    row_.storage_datums_[word_idx].set_datum(word_iter_->first.get_word());
+    row_.storage_datums_[doc_idx].shallow_copy_from_datum(doc_id_);
+    row_.storage_datums_[2].set_uint(word_iter_->second);
+    row_.storage_datums_[3].set_uint(doc_length_);
+    row = &row_;
+    ++word_iter_;
     ++row_idx_;
   }
-  LOG_TRACE("get next row", K(ret), KPC(row), K(row_idx_), K(rows_.count()));
+  LOG_TRACE("get next row", K(ret), KPC(row), K(row_idx_), K(word_map_.size()));
+  return ret;
+}
+
+int ObFTIndexRowCache::get_next_batch(ObDatum **columns, const int64_t capacity, int64_t &count)
+{
+  int ret = OB_SUCCESS;
+  count = 0;
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = OB_NOT_INIT;
+  } else if (OB_UNLIKELY(capacity <= 0) || OB_ISNULL(columns)
+             || OB_ISNULL(columns[0]) || OB_ISNULL(columns[1])
+             || OB_ISNULL(columns[2]) || OB_ISNULL(columns[3])) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (row_idx_ >= word_map_.size()) {
+    ret = OB_ITER_END;
+  } else {
+    count = MIN(capacity, word_map_.size() - static_cast<int64_t>(row_idx_));
+    const int64_t word_idx = is_fts_index_aux_ ? 0 : 1;
+    const int64_t doc_idx = is_fts_index_aux_ ? 1 : 0;
+    // One batch borrows from exactly one document. The caller consumes these
+    // datums before segment() resets that document's arena.
+    for (int64_t i = 0; i < count; ++i) {
+      columns[word_idx][i] = word_iter_->first.get_word();
+      columns[doc_idx][i] = doc_id_;
+      columns[2][i].set_uint(word_iter_->second);
+      columns[3][i].set_uint(doc_length_);
+      ++word_iter_;
+    }
+    row_idx_ += count;
+  }
   return ret;
 }
 
 void ObFTIndexRowCache::reset()
 {
+  word_iter_ = storage::ObFTWordMap::const_iterator();
+  row_.reset();
+  doc_id_.set_null();
+  doc_length_ = 0;
   word_map_.destroy();
   word_map_.get_local_allocer().reserve(0);
-  rows_.reset();
+  release_word_map_ = false;
   row_idx_ = 0;
   is_fts_index_aux_ = true;
   helper_.reset();
-  parser_allocator_.reset();
   if (OB_NOT_NULL(merge_memctx_)) {
     DESTROY_CONTEXT(merge_memctx_);
     merge_memctx_ = nullptr;
@@ -139,10 +198,18 @@ void ObFTIndexRowCache::reset()
 
 void ObFTIndexRowCache::reuse()
 {
-  // The next generate_fulltext_word_rows() call clears word_map_ before it
-  // reads or writes any key.  Avoid scanning the same buckets twice; map
-  // nodes do not dereference their shallow word keys while being cleared.
-  rows_.reuse();
+  // Release references to document-owned token bytes before resetting their
+  // arena. Retain buckets/nodes only for bounded-size documents.
+  word_iter_ = storage::ObFTWordMap::const_iterator();
+  if (release_word_map_) {
+    word_map_.destroy();
+    word_map_.get_local_allocer().reserve(0);
+    release_word_map_ = false;
+  } else if (word_map_.created()) {
+    word_map_.reuse();
+  }
+  doc_id_.set_null();
+  doc_length_ = 0;
   row_idx_ = 0;
   if (OB_NOT_NULL(merge_memctx_)) {
     merge_memctx_->reset_remain_one_page();
@@ -319,17 +386,11 @@ int ObDASDomainUtils::build_ft_doc_word_infos(
                                                  ft_word_map))) {
   } else if (0 == ft_word_map.size()) {
     ret = OB_ITER_END;
-  } else if (OB_FAIL(word_rows.reserve(ft_word_map.size()))) {
   } else if (OB_ISNULL(rows_buf = reinterpret_cast<char *>(
                            allocator.alloc(ft_word_map.size() * sizeof(blocksstable::ObDatumRow))))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else {
     int64_t i = 0;
-    // Column positions are invariant for every word row in this document.
-    const int64_t word_idx = is_fts_index_aux ? 0 : 1;
-    const int64_t doc_id_idx = is_fts_index_aux ? 1 : 0;
-    const int64_t word_cnt_idx = 2;
-    const int64_t doc_len_idx = 3;
     rows = new (rows_buf) blocksstable::ObDatumRow[ft_word_map.size()];
     for (ObFTWordMap::const_iterator iter = ft_word_map.begin();
          OB_SUCC(ret) && iter != ft_word_map.end();
@@ -338,6 +399,13 @@ int ObDASDomainUtils::build_ft_doc_word_infos(
       } else {
         const ObFTWord &ft_word = iter->first;
         const int64_t word_cnt = iter->second;
+        // index row format
+        //  -    FTS_INDEX: [WORD], [DOC_ID], [WORD_COUNT], [DOC_LENGTH]
+        //  - FTS_DOC_WORD: [DOC_ID], [WORD], [WORD_COUNT], [DOC_LENGTH]
+        const int64_t word_idx = is_fts_index_aux ? 0 : 1;
+        const int64_t doc_id_idx = is_fts_index_aux ? 1 : 0;
+        const int64_t word_cnt_idx = 2;
+        const int64_t doc_len_idx = 3;
         rows[i].storage_datums_[word_idx].set_datum(ft_word.get_word());
         rows[i].storage_datums_[doc_id_idx].shallow_copy_from_datum(doc_id_datum);
         rows[i].storage_datums_[word_cnt_idx].set_uint(word_cnt);
@@ -367,8 +435,7 @@ int ObDASDomainUtils::build_ft_doc_word_infos(
                   || ObCollationType::CS_TYPE_PINYIN_BEGIN_MARK <= type)
       || OB_UNLIKELY(!words_count.created())) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (OB_FAIL(helper->segment(
-                 meta, fulltext.ptr(), fulltext.length(), doc_length, words_count, &allocator))) {
+  } else if (OB_FAIL(helper->segment(meta, fulltext.ptr(), fulltext.length(), doc_length, words_count))) {
   }
 
   STORAGE_FTS_LOG(TRACE, "segment and calc word count", K(ret), K(words_count.size()), K(type));
@@ -859,10 +926,7 @@ void ObFTDMLIterator::reset()
 {
   is_inited_ = false;
   data_plane::reset_ft_doc_word_iterator(ft_doc_word_iter_);
-  word_map_.destroy();
-  word_map_.get_local_allocer().reserve(0);
   ft_parse_helper_.reset();
-  parser_allocator_.reset();
   ObDomainDMLIterator::reset();
 }
 
@@ -888,8 +952,7 @@ int ObFTDMLIterator::rewind()
         // This is the same as the parser name of the previous index.
         // nothing to do, just skip.
       } else if (FALSE_IT(ft_parse_helper_.reset())) {
-      } else if (FALSE_IT(parser_allocator_.reset())) {
-      } else if (OB_FAIL(ft_parse_helper_.init(&parser_allocator_, parser_str, parser_property_str))) {
+      } else if (OB_FAIL(ft_parse_helper_.init(&allocator_, parser_str, parser_property_str))) {
       }
     } else if (ObDomainDMLMode::DOMAIN_DML_MODE_FT_SCAN == mode_) {
       if (OB_ISNULL(ft_doc_word_iter_)
@@ -925,7 +988,7 @@ int ObFTDMLIterator::init(
   } else {
     switch (mode_) {
       case ObDomainDMLMode::DOMAIN_DML_MODE_DEFAULT: {
-        if (OB_FAIL(ft_parse_helper_.init(&parser_allocator_, parser_name, parser_properties))) {
+        if (OB_FAIL(ft_parse_helper_.init(&allocator_, parser_name, parser_properties))) {
         }
         break;
       }
@@ -946,12 +1009,6 @@ int ObFTDMLIterator::init(
       }
       default: {
         ret = OB_ERR_UNEXPECTED;
-      }
-    }
-    if (OB_SUCC(ret)) {
-      // Keep a small freelist for the common document size. Large documents
-      // use the original per-call map path below and are not retained here.
-      if (OB_FAIL(word_map_.get_local_allocer().reserve(256))) {
       }
     }
     if (OB_SUCC(ret)) {
@@ -988,8 +1045,7 @@ int ObFTDMLIterator::change_domain_dml_mode(const ObDomainDMLMode &mode)
           // This is the same as the parser name of the previous index.
           // nothing to do, just skip.
         } else if (FALSE_IT(ft_parse_helper_.reset())) {
-        } else if (FALSE_IT(parser_allocator_.reset())) {
-        } else if (OB_FAIL(ft_parse_helper_.init(&parser_allocator_, parser_str, parser_property_str))) {
+        } else if (OB_FAIL(ft_parse_helper_.init(&allocator_, parser_str, parser_property_str))) {
         }
         break;
       }
@@ -1060,9 +1116,7 @@ int ObFTDMLIterator::generate_ft_word_rows(const ObChunkDatumStore::StoredRow *s
                                                                    doc_id_datum,
                                                                    ft,
                                                                    is_fts_index_aux,
-                                                                   rows_,
-                                                                   ft.length() <= OB_MALLOC_NORMAL_BLOCK_SIZE
-                                                                     ? &word_map_ : nullptr))) {
+                                                                   rows_))) {
     if (OB_UNLIKELY(OB_ITER_END != ret)) {
     }
   }

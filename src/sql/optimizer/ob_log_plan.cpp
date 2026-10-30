@@ -12038,13 +12038,10 @@ int ObLogPlan::prepare_text_retrieval_scan(const ObIArray<ObRawExpr *> &scan_mat
                                                  table_scan->get_text_retrieval_info()))) {
   } else {
     ObTextRetrievalInfo &tr_info = table_scan->get_text_retrieval_info();
-    if (table_scan->get_index_back()) {
-      tr_info.need_calc_relevance_ = true;
-    }
     tr_info.match_expr_ = match_against;
-    tr_info.pushdown_match_filter_ = tr_info.need_calc_relevance_ ? match_pred : nullptr;
+    tr_info.pushdown_match_filter_ = match_pred;
     // A bare natural-language MATCH predicate needs membership only. Keep
-    // scoring for other search modes, boosts, subqueries, and score consumers.
+    // scoring for other search modes, boosts, subqueries, and any score consumer.
     if (NATURAL_LANGUAGE_MODE == match_against->get_mode_flag()
         && !match_against->is_es_match()
         && match_against->get_columns_boosts().empty()
@@ -12296,28 +12293,6 @@ int ObLogPlan::prepare_text_retrieval_info(const uint64_t ref_table_id,
     }
   }
   if (OB_SUCC(ret)) {
-    const ObDMLStmt *stmt = get_stmt();
-    if (stmt->is_select_stmt()) {
-      const ObSelectStmt *select_stmt = static_cast<const ObSelectStmt *>(stmt);
-      const ObIArray<SelectItem> &select_items = select_stmt->get_select_items();
-      const ObIArray<ObRawExpr *> &conditions = select_stmt->get_condition_exprs();
-      // A natural-language MATCH used only as the predicate of COUNT(*) needs
-      // the matching document ids, but not BM25 scores or document statistics.
-      if (match_against->get_mode_flag() == NATURAL_LANGUAGE_MODE
-          && select_items.count() == 1 && OB_NOT_NULL(select_items.at(0).expr_)
-          && select_items.at(0).expr_->get_expr_type() == T_FUN_COUNT
-          && static_cast<const ObAggFunRawExpr *>(select_items.at(0).expr_)->get_real_param_count() == 0
-          && !select_stmt->has_order_by() && !select_stmt->has_having()
-          && !select_stmt->has_window_function() && conditions.count() == 1) {
-        const ObRawExpr *condition = conditions.at(0);
-        if (condition == match_against
-            || (OB_NOT_NULL(condition) && condition->get_expr_type() == T_OP_BOOL
-                && condition->get_param_count() == 1
-                && condition->get_param_expr(0) == match_against)) {
-          need_calc_relevance = false;
-        }
-      }
-    }
     /*
     if (OB_FAIL(ObTransformUtils::check_need_calc_match_score(get_optimizer_context().get_exec_ctx(),
                                                               get_stmt(),

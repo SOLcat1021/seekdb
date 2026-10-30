@@ -161,11 +161,10 @@ public:
       common::ObIAllocator *allocator,
       const common::ObString &parser_name,
       const common::ObString &parser_properties);
-
-  // Rebind only the scratch allocator when a previously initialized helper is
-  // reused for another synchronous TOKENIZE call. Parser metadata and the
-  // built-in descriptor remain immutable for the cached helper.
-  int bind_allocator(common::ObIAllocator *allocator);
+  // The caller supplies validated properties or immutable built-in defaults.
+  int init(common::ObIAllocator *allocator,
+           const common::ObString &parser_name,
+           const ObFTParserProperty &parser_properties);
   /**
    * Split document into multiple words
    *
@@ -180,8 +179,7 @@ public:
       const char *fulltext,
       const int64_t fulltext_len,
       int64_t &doc_length,
-      ObFTWordMap &words,
-      common::ObIAllocator *word_allocator = nullptr) const;
+      ObFTWordMap &words) const;
   int check_is_the_same(
       const common::ObString &parser_name,
       const common::ObString &parser_properties,
@@ -222,11 +220,6 @@ private:
       const int64_t fulltext_len,
       common::ObIAllocator &allocator,
       ObAddWord &add_word);
-  int segment_with_cache(
-      const ObCharsetInfo *cs,
-      const char *fulltext,
-      int64_t fulltext_len,
-      ObAddWord &add_word) const;
   int set_add_word_flag(const ObIFTParserDesc &ftparser_desc);
 private:
   common::ObIAllocator *allocator_;
@@ -234,8 +227,6 @@ private:
   ObFTParser parser_name_;
   ObAddWordFlag add_word_flag_;
   ObFTParserProperty parser_property_;
-  mutable ObITokenIterator *cached_iter_;
-  mutable ObFTParserParam cached_param_;
   bool is_inited_;
 
 private:

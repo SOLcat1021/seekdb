@@ -1,0 +1,39 @@
+--disable_query_log
+select json_type(json_extract(ai_prompt('{0}', json_array(1,true)), '$.args[0]')) as array_type,
+       json_type(json_extract(ai_prompt('{0}', json_object('k',2)), '$.args[0]')) as object_type;
+--disable_warnings
+drop table if exists ai_prompt_regression_lob;
+--enable_warnings
+create table ai_prompt_regression_lob(t longtext, a longtext);
+insert into ai_prompt_regression_lob values(repeat('界',30000),repeat('x',90000));
+select char_length(json_unquote(json_extract(ai_prompt(t,a),'$.template'))) as template_chars,
+       char_length(json_unquote(json_extract(ai_prompt(t,a),'$.args[0]'))) as argument_chars
+from ai_prompt_regression_lob;
+drop table ai_prompt_regression_lob;
+--disable_result_log
+--error 0,11118
+call DBMS_AI_SERVICE.DROP_AI_MODEL('prompt_regression_model');
+--error 0,11112
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('prompt_regression_endpoint');
+--error 5083
+select ai_prompt('{0}',cast(null as char));
+--error 1210
+select ai_prompt(cast(null as char),'x');
+--enable_result_log
+--exec python3 mysql_test/test_suite/ai_column/include/ai_column_mock.py start 18082
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('prompt_regression_model','{"type":"completion","model_name":"prompt-regression"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('prompt_regression_endpoint','{"ai_model_name":"prompt_regression_model","scope":"all","url":"http://127.0.0.1:18082/v1/chat/completions","access_key":"mock-key","provider":"openai"}');
+select ai_complete('prompt_regression_model',ai_prompt('{0}/{0}/{0}','你好'),'{}') = 'mock:你好/你好/你好' as repeated_ok;
+select char_length(ai_complete('prompt_regression_model',ai_prompt('{0}{0}{0}{0}',repeat('a',20000)),'{}')) as expanded_chars;
+select replace(ai_complete('prompt_regression_model',ai_prompt('外{0}|{1}',ai_prompt('内{0}','词'),json_array(1,true)),'{}'),' ','') = 'mock:外内词|[1,true]' as nested_ok;
+select json_valid(substring(ai_complete('prompt_regression_model',ai_prompt('{0}',json_object('quote','a\\b"c')),'{}'),6)) as escaped_json_ok;
+--disable_result_log
+--error 1210
+select ai_complete('prompt_regression_model',ai_prompt('{1}','x'),'{}');
+--error 1210
+select ai_complete('prompt_regression_model',ai_prompt('{184467440737095516160}','x'),'{}');
+--enable_result_log
+call DBMS_AI_SERVICE.DROP_AI_MODEL('prompt_regression_model');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('prompt_regression_endpoint');
+--exec python3 mysql_test/test_suite/ai_column/include/ai_column_mock.py stop 18082
+--enable_query_log

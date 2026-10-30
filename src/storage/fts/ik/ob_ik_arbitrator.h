@@ -63,9 +63,8 @@ private:
 
 private:
   ObArenaAllocator alloc_;
-  // Conflict chains are keyed by their starting byte offset.  They are
-  // inserted in document order, so a compact sorted array avoids a hash node
-  // and bucket lookup for the small batches produced by IK.
+  // Conflict chains are indexed by their starting byte offset. Small batches
+  // need no bucket or node allocation; larger batches grow without a limit.
   ObSEArray<ObIKTokenChain *, 16> chains_;
 
 private:
