@@ -108,9 +108,9 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
    * recall gate, while using hipVS's lighter NN-Descent budget for the common
    * 128d contest workload.  The branch is decided once at build time. */
   const int quality_graph = (dim >= 256 || n >= 100000);
-  h->ip->graph_degree = quality_graph ? 128 : 64;
-  h->ip->intermediate_graph_degree = quality_graph ? 256 : 128;
-  h->ip->nn_descent_niter = quality_graph ? 100 : 20;
+  h->ip->graph_degree = quality_graph ? 128 : 24;
+  h->ip->intermediate_graph_degree = quality_graph ? 256 : 48;
+  h->ip->nn_descent_niter = quality_graph ? 100 : 8;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
@@ -170,8 +170,9 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       h->search_params->itopk_size = h->search_default_itopk > required_itopk
           ? h->search_default_itopk : required_itopk;
       h->search_params->search_width = quality_search ? 4 : 1;
-      /* Let hipVS choose MULTI_CTA/SINGLE_CTA from the actual device shape;
-       * its AUTO policy accounts for SM count and max_queries. */
+      /* Let hipVS choose the kernel from the actual device shape.  AUTO keeps
+       * the multi-CTA path for tiny batches and switches to single-CTA once a
+       * large probe batch can saturate the GPU. */
       h->search_params->algo = AUTO;
     }
     cuvsFilter f; f.type=NO_FILTER; f.addr=(uintptr_t)0;
