@@ -40,6 +40,23 @@ the server. The maintained bridge source and build entry point are under
 tools/hipvs_bridge/build.sh /work/bridge/libseekdb_cuvs_bridge.so
 ```
 
+Large high-dimensional indexes seed CAGRA with IVF-PQ. The bridge bounds its
+temporary search batch to 1024 rows through hipVS's public C++ API because the
+pinned C adapter does not forward `max_internal_batch_size`. NN-Descent keeps
+its C API path; searches and persistence use the same C ABI for both builders.
+Large low-dimensional indexes use a 32-neighbor graph with four NN-Descent
+iterations. For aligned high-dimensional vectors up to 512 dimensions, IVF-PQ
+uses one scalar subcodebook per dimension, 20 probes, FP32 lookup/distance
+arithmetic and 1.25x candidate refinement. Other shapes retain hipVS's default PQ
+layout and precision. The query budget remains at least 512 candidates with
+search width four.
+
+The build script extracts `cpp_headers.zip` into a temporary directory for
+offline compilation. It contains public source headers and licenses, with
+upstream URLs, pinned commits and the archive hash in `cpp_headers_sources.json`.
+It contains no runtime libraries or datasets and leaves the installed hipVS and
+ROCm libraries unchanged. Python 3 is required for extraction.
+
 The bridge exports:
 
 ```text

@@ -1,5 +1,6 @@
 /* seekdb <-> hipVS bridge: plain-C CAGRA kNN; all cuVS/ROCm deps live here. */
 #include "seekdb_cuvs_bridge.h"
+#include "seekdb_cuvs_bounded_build.h"
 #include <cuvs/core/c_api.h>
 #include <cuvs/neighbors/cagra.h>
 #include <dlpack/dlpack.h>
@@ -110,11 +111,11 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
   const int quality_graph = (dim >= 256 || n >= 100000);
   /* Retain the baseline's final degree while reducing the temporary graph
    * and NN-Descent refinement budget. Query-time search stays unchanged. */
-  h->ip->graph_degree = quality_graph ? 128 : 24;
-  h->ip->intermediate_graph_degree = quality_graph ? 128 : 48;
-  h->ip->nn_descent_niter = quality_graph ? 64 : 8;
+  h->ip->graph_degree = (dim < 256 && n >= 100000) ? 32 : (quality_graph ? 128 : 24);
+  h->ip->intermediate_graph_degree = (dim < 256 && n >= 100000) ? 32 : (quality_graph ? 128 : 48);
+  h->ip->nn_descent_niter = (dim < 256 && n >= 100000) ? 4 : (quality_graph ? 64 : 8);
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
-  if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
+  if (sk_cuvs_cagra_build_bounded(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
   if (pthread_mutex_init(&h->search_mu, NULL) != 0) goto fail_idx;
   h->search_mu_ready = 1;

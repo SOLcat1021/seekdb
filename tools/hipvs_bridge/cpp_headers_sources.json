@@ -1,0 +1,30 @@
+{
+  "purpose": "public C++ headers for offline bridge compilation; no runtime libraries or datasets",
+  "libraries": {
+    "hipvs": {
+      "url": "https://github.com/AMD-Ecosystem/hipVS",
+      "commit": "f96a663d0a4441d6f5344bd3ef552b71ae7b370b"
+    },
+    "hipraft": {
+      "url": "https://github.com/ROCm-DS/hipRaft",
+      "commit": "baafb19bb11d7a32060a46c66c6d440cac21b5c1"
+    },
+    "hipmm": {
+      "url": "https://github.com/ROCm-DS/hipMM",
+      "commit": "22732e49aa00ba179847e3b314371f2307f47a9a"
+    },
+    "logger": {
+      "url": "https://github.com/ROCm-DS/rocmds-logger",
+      "commit": "22b252ceb6d8f2a83f44b0e5e6d8ee7d9ae0f708"
+    },
+    "libhipcxx": {
+      "url": "https://github.com/ROCm/libhipcxx",
+      "commit": "45cae2d97824f461e062d3f316f0b4cbe3ee24e3"
+    }
+  },
+  "generated_headers": {
+    "raft/core/logger_macros.hpp": "upstream logger template: RAFT, raft::default_logger()",
+    "rmm/logger_macros.hpp": "upstream logger template: RMM, rmm::default_logger()"
+  },
+  "archive_sha256": "4aba7211665d19fbf806783a0eb32f3b3d2bd2599594c640638d37e39d3d71c9"
+}
