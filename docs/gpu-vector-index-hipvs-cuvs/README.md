@@ -40,16 +40,25 @@ the server. The maintained bridge source and build entry point are under
 tools/hipvs_bridge/build.sh /work/bridge/libseekdb_cuvs_bridge.so
 ```
 
-Large high-dimensional indexes seed CAGRA with IVF-PQ. The bridge bounds its
-temporary search batch to 1024 rows through hipVS's public C++ API because the
-pinned C adapter does not forward `max_internal_batch_size`. NN-Descent keeps
-its C API path; searches and persistence use the same C ABI for both builders.
-Large low-dimensional indexes use a 32-neighbor graph with four NN-Descent
-iterations. For aligned high-dimensional vectors up to 512 dimensions, IVF-PQ
-uses one scalar subcodebook per dimension, 20 probes, FP32 lookup/distance
-arithmetic and 1.25x candidate refinement. Other shapes retain hipVS's default PQ
-layout and precision. The query budget remains at least 512 candidates with
-search width four.
+The default builder is NN-Descent. High-dimensional indexes use final degree
+128, intermediate degree 256 and 100 iterations, restoring the frozen
+baseline's graph-quality budget. Large low-dimensional indexes retain
+the separately measured 32-neighbor graph with four iterations. The query
+budget remains at least 512 candidates with search width four; reusable
+buffers and the persistent server worker remain enabled.
+
+The prior quantized IVF-PQ policy failed the official hidden-data
+`recall@100_baseline_delta` gate despite passing the public proxy checks. It is
+therefore not selected by the default policy. The bounded C++ builder remains
+available internally for further experiments, with its 1024-row workspace
+bound; public proxy performance is not evidence that hidden recall passes.
+The earlier 128/128/64 NN-Descent budget also exceeded the 0.005 relative
+Recall@100 tolerance on a new public Gaussian seed, so it is not the fallback.
+The [regression report](validation/recall-regression-20261031.md) records the
+additional distribution checks. After collecting paired SQL, bridge and
+functional evidence, `validation/audit_public_recall.py --work /work/evidence`
+checks every applicable gate and verifies that the measured bridge hashes
+match. A completed measurement process alone is not an acceptance result.
 
 The build script extracts `cpp_headers.zip` into a temporary directory for
 offline compilation. It contains public source headers and licenses, with
