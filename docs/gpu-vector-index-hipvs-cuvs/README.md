@@ -40,25 +40,33 @@ the server. The maintained bridge source and build entry point are under
 tools/hipvs_bridge/build.sh /work/bridge/libseekdb_cuvs_bridge.so
 ```
 
-The default builder is NN-Descent. High-dimensional indexes use final degree
-128, intermediate degree 256 and 100 iterations, restoring the frozen
-baseline's graph-quality budget. Large low-dimensional indexes retain
-the separately measured 32-neighbor graph with four iterations. The query
-budget remains at least 512 candidates with search width four; reusable
-buffers and the persistent server worker remain enabled.
+Large high-dimensional indexes use bounded IVF-PQ graph construction with
+final and intermediate degree 128. The temporary construction batch is capped
+at 1,536 rows. Aligned inputs of up to 512 dimensions use four-bit scalar
+codewords, FP32 distance tables, 20 probes and 1.25x exact refinement. Other
+shapes retain the library's default quantizer layout. Large lower-dimensional
+indexes keep the 32-neighbor NN-Descent graph with four iterations.
 
-The prior quantized IVF-PQ policy failed the official hidden-data
-`recall@100_baseline_delta` gate despite passing the public proxy checks. It is
-therefore not selected by the default policy. The bounded C++ builder remains
-available internally for further experiments, with its 1024-row workspace
-bound; public proxy performance is not evidence that hidden recall passes.
-The earlier 128/128/64 NN-Descent budget also exceeded the 0.005 relative
-Recall@100 tolerance on a new public Gaussian seed, so it is not the fallback.
-The [regression report](validation/recall-regression-20261031.md) records the
-additional distribution checks. After collecting paired SQL, bridge and
-functional evidence, `validation/audit_public_recall.py --work /work/evidence`
-checks every applicable gate and verifies that the measured bridge hashes
-match. A completed measurement process alone is not an acceptance result.
+Serving uses the installed CAGRA implementation with AUTO, search width four
+and a candidate budget of at least four times Top-k. The minimum is 2,048 for
+indexes with at least 100,000 rows and 256 dimensions, and 512 otherwise.
+Reusable buffers and the persistent server worker remain enabled. Supported
+search-parameter tuning is permitted by the
+[official task, section 3.1](https://oceanbase.yuque.com/org-wiki-obtech-vh7w9r/hc3pio/seebnbaoxot1b0tb).
+The installed hipVS and ROCm libraries are unchanged.
+
+The previous fast graph with only 512 search candidates failed the official
+hidden-data `recall@100_baseline_delta` gate. Broad distribution checks
+reproduced the regression, then demonstrated why the larger search budget is
+needed. The NN-Descent quality control remains saved in commit `a3e8143250`.
+See the [search-budget repair](validation/search-budget-repair-20261031.md)
+for the selected policy and the [control report](validation/recall-regression-20261031.md)
+for its fallback. Both describe the limitations of public measurements. After collecting
+paired SQL, bridge and functional evidence, run
+`validation/audit_public_recall.py` with `--work`, `--label`, `--probe-version`
+and `--bridge` naming the selected measurements. It checks every applicable
+gate and verifies that the measured bridge hashes match. A
+completed process alone does not establish acceptance or an official score.
 
 The build script extracts `cpp_headers.zip` into a temporary directory for
 offline compilation. It contains public source headers and licenses, with
@@ -155,9 +163,10 @@ The no-GPU DDL contract remains covered by
 ## Current limitations
 
 - Phase 1 supports dense float32 L2 indexes only.
-- GPU indexes are process-local and rebuilt lazily; persistence and cache reuse
-  are follow-up work.
+- GPU handles are process-local. Persisted CAGRA snapshots can be restored
+  after restart; an index without a usable snapshot builds lazily.
 - The explicit batch API rebuilds its CAGRA index per call.
 - GPU validation is manual because upstream CI has no compatible GPU runner.
-- Multi-GPU, long-duration, and snapshot-reload coverage are out of scope for
-  this phase.
+- Multi-GPU and long-duration validation remain outside this phase. The
+  regression checks cover snapshot reload, insert visibility and delete/filter
+  exclusion on the measured public datasets.

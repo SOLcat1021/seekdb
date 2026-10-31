@@ -8,7 +8,7 @@
 #include <memory>
 
 #ifndef SEEKDB_CUVS_BUILD_BATCH
-#define SEEKDB_CUVS_BUILD_BATCH 1024
+#define SEEKDB_CUVS_BUILD_BATCH 1536
 #endif
 #ifndef SEEKDB_CUVS_BUILD_REFINEMENT
 #define SEEKDB_CUVS_BUILD_REFINEMENT 1.25
@@ -47,8 +47,8 @@ extern "C" cuvsError_t sk_cuvs_cagra_build_bounded(
     auto graph_params = cuvs::neighbors::graph_build_params::ivf_pq_params(
         vectors.extents(), cpp_params.metric);
     // The fixed hipVS C adapter drops the batch bound; use its public C++ API
-    // to control temporary memory and graph quality. Search parameters and
-    // the installed hipVS libraries stay unchanged.
+    // to control temporary memory and graph quality. The installed hipVS libraries
+    // stay unchanged; serving uses their supported CAGRA search parameters.
     graph_params.search_params.max_internal_batch_size = SEEKDB_CUVS_BUILD_BATCH;
     graph_params.search_params.n_probes = 20;
     // Use scalar codewords for aligned vectors up to 512 dimensions; retain

@@ -104,17 +104,16 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
   dset.dl_tensor.shape = ds; dset.dl_tensor.strides = 0; dset.dl_tensor.byte_offset = 0;
 
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
-  /* Keep the measured NN-Descent builder for every shape.  Quantized IVF-PQ
-   * seeding can pass absolute recall while losing more than 0.005 Recall@100
-   * against the baseline on another distribution.  Restore the frozen
-   * high-dimensional 128/256/100 budget rather than relying on proxy recall. */
-  h->ip->build_algo = NN_DESCENT;
+  /* High-dimensional large indexes use IVF-PQ to seed the CAGRA graph.
+   * Lower-dimensional inputs retain NN-Descent: IVF-PQ's internal reduced
+   * precision can otherwise lose neighbors on unnormalized vector data. */
+  h->ip->build_algo = (dim >= 256 && n >= 100000) ? IVF_PQ : NN_DESCENT;
   const int quality_graph = (dim >= 256 || n >= 100000);
-  /* Retain the high-dimensional graph budget; keep the independently measured
-   * smaller graph for large, lower-dimensional inputs. Search stays unchanged. */
+  /* Retain the baseline's final degree while reducing the temporary graph
+   * and NN-Descent refinement budget. Serving quality is checked separately. */
   h->ip->graph_degree = (dim < 256 && n >= 100000) ? 32 : (quality_graph ? 128 : 24);
-  h->ip->intermediate_graph_degree = (dim < 256 && n >= 100000) ? 32 : (quality_graph ? 256 : 48);
-  h->ip->nn_descent_niter = (dim < 256 && n >= 100000) ? 4 : (quality_graph ? 100 : 8);
+  h->ip->intermediate_graph_degree = (dim < 256 && n >= 100000) ? 32 : (quality_graph ? 128 : 48);
+  h->ip->nn_descent_niter = (dim < 256 && n >= 100000) ? 4 : (quality_graph ? 64 : 8);
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (sk_cuvs_cagra_build_bounded(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
@@ -165,9 +164,12 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       h->search_default_itopk = h->search_params->itopk_size;
     }
     {
-      /* Reuse allocations without changing the frozen search budget. */
+      /* Reuse allocations while preserving the per-index search budget. */
       const size_t multiplier = 4;
-      const size_t min_itopk = 512;
+      /* Spend surplus query throughput on recall for high-dimensional graphs.
+       * This uses the installed CAGRA search implementation and its supported
+       * candidate budget; no graph search implementation is replaced. */
+      const size_t min_itopk = (h->dim >= 256 && h->n >= 100000) ? 2048 : 512;
       if ((uint64_t)topk > (uint64_t)SIZE_MAX / multiplier) { rc = 4; goto done; }
       size_t required_itopk = (size_t)topk * multiplier;
       if (required_itopk < min_itopk) required_itopk = min_itopk;
