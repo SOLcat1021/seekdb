@@ -15,8 +15,10 @@ import json
 import math
 import os
 import re
+import shutil
 import struct
 import sys
+import uuid
 import zlib
 from functools import cmp_to_key
 from pathlib import Path
@@ -56,6 +58,19 @@ WAL_COMPRESSION_LEVEL = int(os.environ.get("MVD_WAL_COMPRESSION_LEVEL", "4"))
 WAL_COMPRESSION_THRESHOLD = int(os.environ.get("MVD_WAL_COMPRESSION_THRESHOLD", "1024"))
 if not 0 <= WAL_COMPRESSION_LEVEL <= 9 or WAL_COMPRESSION_THRESHOLD < 0:
     raise ValueError("invalid WAL compression settings")
+WAL_MAGIC = b"MVDWAL2\n"
+WAL_HEADER_SIZE = len(WAL_MAGIC) + 16
+CHECKPOINT_MAGIC = b"MVDCKP1\n"
+COPY_BLOCK = 1024 * 1024
+
+
+def sync_directory(path: Path) -> None:
+    if hasattr(os, "O_DIRECTORY"):
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
 
 def load_native_scan():
@@ -88,7 +103,7 @@ class CacheBudget:
 class DiskRows:
     """Append-only rows with a fixed-memory bucket directory and disk chains."""
 
-    def __init__(self, directory: Path, table_name: str, columns: list[dict], budget: CacheBudget):
+    def __init__(self, directory: Path, table_name: str, columns: list[dict], budget: CacheBudget, *, heads=None):
         directory.mkdir(parents=True, exist_ok=True)
         self.heap = (directory / f"{table_name}.dat").open("w+b", buffering=0)
         self.columns = columns
@@ -98,18 +113,18 @@ class DiskRows:
             if column["type"] == "vector"
         }
         self.budget = budget
-        self.cache: dict[str, list] | None = {} if self.vector_structs and budget.limit else None
+        self.cache_pending = heads is not None and bool(self.vector_structs and budget.limit)
+        self.cache: dict[str, list] | None = {} if self.vector_structs and budget.limit and heads is None else None
         self.cache_sizes: dict[str, int] = {}
         self.native_keys: array | None = None
         self.native_vectors: array | None = None
         self.native_bytes = 0
         self.native_filter_masks: dict[tuple, bytearray] = {}
         self.heap.write(b"\0")  # zero is the empty-chain sentinel
-        self.heads = [0] * BUCKETS
+        self.heads = [0] * BUCKETS if heads is None else heads
 
-    @staticmethod
-    def _bucket(key: int) -> int:
-        return key & (BUCKETS - 1)
+    def _bucket(self, key: int) -> int:
+        return key & (len(self.heads) - 1)
 
     def _header(self, offset: int) -> tuple[int, int, int, int]:
         self.heap.seek(offset)
@@ -240,7 +255,18 @@ class DiskRows:
         self.native_vectors = None
         self.native_filter_masks.clear()
 
+    def load_cache(self) -> None:
+        if self.cache_pending:
+            self.cache_pending = False
+            self.cache = {}
+            for key, row in self.items():
+                self._update_cache(key, row)
+                if self.cache is None:
+                    break
+
     def native_topk(self, target: list[float], tests: list, limit: int):
+        if NATIVE_SCAN is not None and limit > 0:
+            self.load_cache()
         if NATIVE_SCAN is None or self.cache is None or limit <= 0:
             return None
         dimension = len(target)
@@ -508,16 +534,20 @@ def matches(row: list, tests: list) -> bool:
 def candidate_items(table: dict, tests: list, *, use_cache: bool = False):
     """Use the primary-key directory for an equality predicate."""
     rows = table["rows"]
-    if use_cache and isinstance(rows, DiskRows) and rows.cache is not None:
-        rows = rows.cache
     for index, operator, value in tests:
         if index == table["primary"] and operator == "=":
             key = str(value)
+            if use_cache and isinstance(rows, DiskRows) and rows.cache is not None:
+                rows = rows.cache
             try:
                 yield key, rows[key]
             except KeyError:
                 pass
             return
+    if use_cache and isinstance(rows, DiskRows):
+        rows.load_cache()
+        if rows.cache is not None:
+            rows = rows.cache
     yield from rows.items()
 
 
@@ -530,6 +560,12 @@ class MiniVectorDB:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.wal = self.data_dir / "commit.wal"
+        self.checkpoint = self.data_dir / "checkpoint.dat"
+        self.checkpoint_bytes = int(os.environ.get("MVD_CHECKPOINT_BYTES", str(8 * 1024 * 1024)))
+        if self.checkpoint_bytes < 0:
+            raise ValueError("MVD_CHECKPOINT_BYTES must be nonnegative")
+        self.wal_generation: str | None = None
+        self.wal_size = 0
         self.materialized = self.data_dir / "materialized"
         self.materialized.mkdir(exist_ok=True)
         self.cache_budget = CacheBudget()
@@ -539,7 +575,7 @@ class MiniVectorDB:
         self.tables: dict[str, dict] = {}
         self.tx_tables: dict[str, dict] | None = None
         self.tx_sql: list[str] = []
-        self._recover()
+        self._recover(self._restore_checkpoint())
 
     def close(self) -> None:
         self.tx_tables = None
@@ -549,11 +585,122 @@ class MiniVectorDB:
             if isinstance(rows, DiskRows):
                 rows.close()
 
-    def _recover(self) -> None:
+    def _restore_checkpoint(self) -> dict | None:
+        if not self.checkpoint.exists():
+            return None
+        with self.checkpoint.open("rb") as stream:
+            header = stream.read(len(CHECKPOINT_MAGIC) + 8)
+            if len(header) != len(CHECKPOINT_MAGIC) + 8 or not header.startswith(CHECKPOINT_MAGIC):
+                raise SQLFailure("invalid checkpoint header")
+            length, checksum = struct.unpack_from("<II", header, len(CHECKPOINT_MAGIC))
+            if length > MAX_FRAME:
+                raise SQLFailure("oversized checkpoint metadata")
+            payload = stream.read(length)
+            if len(payload) != length or zlib.crc32(payload) != checksum:
+                raise SQLFailure("corrupt checkpoint metadata")
+            metadata = json.loads(payload)
+            for table in metadata["tables"]:
+                name, columns, primary = table["name"], table["columns"], table["primary"]
+                size, buckets = table["heap_size"], table["buckets"]
+                if (not IDENT.fullmatch(name) or name in self.tables or size < 1
+                        or not 1024 <= buckets <= 1 << 20 or buckets & (buckets - 1)):
+                    raise SQLFailure("invalid checkpoint table")
+                packed = stream.read(buckets * 8)
+                if len(packed) != buckets * 8:
+                    raise SQLFailure("truncated checkpoint directory")
+                heads = list(struct.unpack(f"<{buckets}Q", packed))
+                if any(offset >= size for offset in heads):
+                    raise SQLFailure("invalid checkpoint bucket offset")
+                rows = DiskRows(self.materialized, name, columns, self.cache_budget, heads=heads)
+                self.tables[name] = {"columns": columns, "primary": primary, "rows": rows}
+                rows.heap.seek(0)
+                remaining = size
+                while remaining:
+                    block = stream.read(min(remaining, COPY_BLOCK))
+                    if not block:
+                        raise SQLFailure("truncated checkpoint heap")
+                    if rows.heap.write(block) != len(block):
+                        raise OSError("short write restoring checkpoint heap")
+                    remaining -= len(block)
+            if stream.read(1):
+                raise SQLFailure("trailing checkpoint data")
+        return metadata
+
+    def _write_checkpoint(self) -> None:
+        generation = uuid.uuid4().hex
+        tables = []
+        for name, table in self.tables.items():
+            rows = table["rows"]
+            tables.append({
+                "name": name, "columns": table["columns"], "primary": table["primary"],
+                "heap_size": rows.heap.seek(0, os.SEEK_END), "buckets": len(rows.heads),
+            })
+        payload = json.dumps({
+            "generation": generation, "previous_generation": self.wal_generation,
+            "wal_cutoff": self.wal_size, "tables": tables,
+        }, separators=(",", ":")).encode("utf-8")
+        if len(payload) > MAX_FRAME:
+            raise OSError("checkpoint metadata too large")
+        temporary = self.checkpoint.with_suffix(".tmp")
+        with temporary.open("wb") as stream:
+            stream.write(CHECKPOINT_MAGIC + struct.pack("<II", len(payload), zlib.crc32(payload)))
+            stream.write(payload)
+            for table in self.tables.values():
+                rows = table["rows"]
+                stream.write(struct.pack(f"<{len(rows.heads)}Q", *rows.heads))
+                rows.heap.seek(0)
+                shutil.copyfileobj(rows.heap, stream, length=COPY_BLOCK)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Publish and sync the snapshot before discarding any covered WAL bytes.
+        os.replace(temporary, self.checkpoint)
+        sync_directory(self.data_dir)
+        self._rotate_wal(generation)
+
+    def _rotate_wal(self, generation: str) -> None:
+        temporary = self.wal.with_suffix(".tmp")
+        with temporary.open("wb") as stream:
+            stream.write(WAL_MAGIC + bytes.fromhex(generation))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, self.wal)
+        sync_directory(self.data_dir)
+        self.wal_generation = generation
+        self.wal_size = WAL_HEADER_SIZE
+
+    def _maybe_checkpoint(self) -> None:
+        header_size = WAL_HEADER_SIZE if self.wal_generation is not None else 0
+        if self.checkpoint_bytes and self.wal_size - header_size >= self.checkpoint_bytes:
+            self._write_checkpoint()
+
+    def _recover(self, checkpoint: dict | None) -> None:
         if not self.wal.exists():
+            if checkpoint is not None:
+                raise SQLFailure("missing checkpoint WAL")
             return
-        valid = 0
-        with self.wal.open("rb") as stream:
+        with self.wal.open("r+b") as stream:
+            size = os.fstat(stream.fileno()).st_size
+            start = 0
+            if stream.read(len(WAL_MAGIC)) == WAL_MAGIC:
+                generation = stream.read(16)
+                if len(generation) != 16:
+                    raise SQLFailure("truncated WAL generation")
+                self.wal_generation = generation.hex()
+                start = WAL_HEADER_SIZE
+            old_wal = False
+            if checkpoint is None:
+                if self.wal_generation is not None:
+                    raise SQLFailure("missing WAL checkpoint")
+            elif self.wal_generation != checkpoint["generation"]:
+                if self.wal_generation != checkpoint["previous_generation"]:
+                    raise SQLFailure("checkpoint WAL generation mismatch")
+                # The checkpoint was published, but the covered WAL was not replaced yet.
+                start = checkpoint["wal_cutoff"]
+                if not stream.tell() <= start <= size:
+                    raise SQLFailure("invalid checkpoint WAL offset")
+                old_wal = True
+            stream.seek(start)
+            valid = start
             while True:
                 header = stream.read(8)
                 if not header:
@@ -587,8 +734,12 @@ class MiniVectorDB:
                 except (ValueError, SQLFailure, KeyError, TypeError):
                     raise SQLFailure("corrupt committed WAL frame")
                 valid = stream.tell()
-        with self.wal.open("r+b") as stream:
-            stream.truncate(valid)
+            if valid != size:
+                stream.truncate(valid)
+                os.fsync(stream.fileno())
+        self.wal_size = valid
+        if old_wal and valid == start:
+            self._rotate_wal(checkpoint["generation"])
 
     def _commit_log(self, commands: list[str]) -> None:
         if not commands:
@@ -611,6 +762,9 @@ class MiniVectorDB:
             os.fsync(fd)
         finally:
             os.close(fd)
+        if not self.wal_size:
+            sync_directory(self.data_dir)
+        self.wal_size += len(frame)
 
     def execute(self, sql: str) -> dict:
         parser = Parser(sql)
@@ -640,6 +794,7 @@ class MiniVectorDB:
                 replay.done()
             self.tx_tables = None
             self.tx_sql = []
+            self._maybe_checkpoint()
             return {}
         active = self.tx_tables if self.tx_tables is not None else self.tables
         if keyword == "SELECT":
@@ -652,6 +807,7 @@ class MiniVectorDB:
         if self.tx_tables is None:
             self._commit_log([sql])
             self._materialize_candidate(candidate)
+            self._maybe_checkpoint()
         else:
             self.tx_tables = candidate
             self.tx_sql.append(sql)

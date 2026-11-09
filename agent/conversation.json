@@ -42,6 +42,11 @@
       "id": "u08",
       "source": "student",
       "content": "好的，做吧"
+    },
+    {
+      "id": "u09",
+      "source": "student",
+      "content": "好，按这个顺序做吧，先实现 checkpoint 和 WAL 截断，测一下重启过程中再次强杀能不能恢复，再对比优化前后的启动耗时。半小时内完成然后提测一次"
     }
   ],
   "experiments": [
@@ -74,6 +79,18 @@
       "source": "tool_result",
       "purpose": "Build the pinned Python 3.12 slim Docker image from source and run all public fixtures through the container process entry point.",
       "output": "Successfully built 0ce8dcd537f1\nSuccessfully tagged minivectordb:local\nPASS all public process cases: 95 statements"
+    },
+    {
+      "id": "e06",
+      "source": "tool_result",
+      "purpose": "Migrate legacy WAL and interrupt recovery twice in the same committed transaction. Also interrupt checkpoint publication and WAL replacement.",
+      "output": "PASS legacy WAL migration and checkpoint truncation: 4123 -> 24 bytes\nPASS two kills after partial tail replay, complete transaction after restart, torn tail removed\nPASS kills before and after checkpoint publication and after WAL replacement, including later writes"
+    },
+    {
+      "id": "e07",
+      "source": "tool_result",
+      "purpose": "Compare initialization against baseline 76e637d on the same 30000 128-dimensional vectors over five interleaved rounds on WSL ext4.",
+      "output": "Median initialization: 1.7309 s -> 0.4019 s. WAL: 10975931 -> 2562161 bytes. First exact TopK: 0.1586 s -> 0.2627 s, same returned keys."
     }
   ],
   "limitations": "The listed experiments were run by the agent's tools. The student asked for a plan, testing and optimization but did not provide an independent explanation of these measurements in the captured messages. No student interpretation or retrospective is inferred from tool output. The public fixtures and local resource probes do not establish formal competition acceptance."

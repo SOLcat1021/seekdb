@@ -58,4 +58,8 @@ printf "%s\n" "SELECT id FROM docs ORDER BY id;" | python3 minivectordb.py --dat
 
 `run_large_data_smoke.py` 在 64 MiB 进程地址空间上限下写入、查询和重启恢复 17,000 行；记录文件约 66.9 MiB。这验证了一个超内存数据场景，尚不能替代正式资源测试。官方性能内存指标是容器 cgroup `memory.peak`，包含页缓存；本地 RSS 不能直接对比。
 
-当前版本的提交日志在启动时全量重放，超大事务的暂存数据仍会占用内存，未实现近似索引或官方环境预检。无 LIMIT 的大结果集也会在返回前积累在内存中。镜像已在 WSL2 Docker 中构建并运行全部公开用例；这不表示正式功能准入通过。
+WAL 达到 8 MiB 后，数据库同步并原子发布 `checkpoint.dat`，随后原子替换已覆盖的 WAL。启动时从快照恢复表与主键桶，只重放 WAL 尾部。若进程在两次发布之间退出，快照仍能识别旧 WAL 中已覆盖的范围。旧版 WAL 可直接打开。`MVD_CHECKPOINT_BYTES` 可改阈值，`0` 停止生成新快照，已有快照仍可恢复。快照会复制当前堆文件，每次生成会增加一次全量磁盘写入，并保留旧记录占用的空间。
+
+`make checkpoint-test` 验证旧 WAL 迁移、恢复途中连续两次 SIGKILL、快照发布和 WAL 替换边界。`TMPDIR=/var/tmp python3 run_checkpoint_recovery.py --benchmark` 对比基线 `76e637d`。在 WSL2 ext4 上写入同样的 30,000 条 128 维向量，交错启动五轮，初始化中位数由 1.731 秒降至 0.402 秒，WAL 由 10,975,931 字节降至 2,562,161 字节。向量缓存延迟加载，首条 TopK 的中位数由 0.159 秒升至 0.263 秒。
+
+超大事务的暂存数据仍会占用内存。无 LIMIT 的大结果集会在返回前积累在内存中。当前版本还缺少近似索引和官方环境预检结果。

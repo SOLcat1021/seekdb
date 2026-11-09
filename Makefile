@@ -13,6 +13,10 @@ test: libmvdscan.so
 	python3 run_native_correctness.py
 	python3 run_large_data_smoke.py
 
+.PHONY: checkpoint-test
+checkpoint-test: libmvdscan.so
+	python3 run_checkpoint_recovery.py
+
 .PHONY: probe
 probe: libmvdscan.so
 	python3 run_perf_probe.py
