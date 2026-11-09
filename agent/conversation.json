@@ -1,0 +1,80 @@
+{
+  "version": "minivectordb-learning-record-1",
+  "scope": "This record covers user prompts visible in the development chat and local results verified on the 2026-competition-round2 branch. It is not a full export of every agent message or tool call.",
+  "synthetic": false,
+  "conversations": [
+    {
+      "id": "u01",
+      "source": "student",
+      "content": "我看每天只能提交两次，我们是否有方法能一定程度模拟赛方给的环境"
+    },
+    {
+      "id": "u02",
+      "source": "student",
+      "content": "这个项目是不是要从0开始做，然后还不让用现有架构"
+    },
+    {
+      "id": "u03",
+      "source": "student",
+      "content": "首先给我一版实现规划，然后跑通再说吧"
+    },
+    {
+      "id": "u04",
+      "source": "student",
+      "content": "有什么优化方法吗，我需要你把整个数据库拆分为一个个组成部件，然后分别查阅针对他们优化方法，CSDN， github，公开论文等"
+    },
+    {
+      "id": "u05",
+      "source": "student",
+      "content": "尝试扫描参数，先把目前的框架的参数调整到最优"
+    },
+    {
+      "id": "u06",
+      "source": "student",
+      "content": "所以调整参数后比之前优化了多少大概"
+    },
+    {
+      "id": "u07",
+      "source": "student",
+      "content": "现在你能自由浏览赛方给的题目要求了，读一读看看有没有什么新的发现，在右边"
+    },
+    {
+      "id": "u08",
+      "source": "student",
+      "content": "好的，做吧"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "e01",
+      "source": "tool_result",
+      "purpose": "Run the updated public SQL fixtures against the database API and its stdin/stdout process entry point.",
+      "output": "PASS all public cases: 95 statements\nPASS all public process cases: 95 statements"
+    },
+    {
+      "id": "e02",
+      "source": "tool_result",
+      "purpose": "Verify transaction recovery and exact vector search after the fixture update.",
+      "output": "PASS transaction rollback, statement atomicity, committed crash recovery, reinsertion, torn WAL tail\nPASS exact TopK random reference, filtering, ties, update/delete/reinsert, rollback, restart"
+    },
+    {
+      "id": "e03",
+      "source": "tool_result",
+      "purpose": "Check a data file larger than the process address-space cap.",
+      "output": "PASS 17000 rows, data file 66.9 MiB, address-space cap 64 MiB, peak RSS 21.9 MiB"
+    },
+    {
+      "id": "e04",
+      "source": "tool_result",
+      "purpose": "Repeat the local 10000-row, 128-dimension, 1000-query probe in three isolated WSL systemd cgroup scopes on ext4 /var/tmp.",
+      "output": "median: write_seconds=1.372, query_seconds=0.499, cgroup_write_io_mib=9.086, cgroup_query_io_mib=0.000, cgroup_peak_mib=31.406\nLocal API probe only; these values do not yield an official E score."
+    },
+    {
+      "id": "e05",
+      "source": "tool_result",
+      "purpose": "Build the pinned Python 3.12 slim Docker image from source and run all public fixtures through the container process entry point.",
+      "output": "Successfully built 0ce8dcd537f1\nSuccessfully tagged minivectordb:local\nPASS all public process cases: 95 statements"
+    }
+  ],
+  "limitations": "The listed experiments were run by the agent's tools. The student asked for a plan, testing and optimization but did not provide an independent explanation of these measurements in the captured messages. No student interpretation or retrospective is inferred from tool output. The public fixtures and local resource probes do not establish formal competition acceptance."
+}

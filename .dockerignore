@@ -1,0 +1,4 @@
+*
+!Dockerfile
+!minivectordb.py
+!native_scan.cpp

@@ -1,0 +1,914 @@
+{
+  "platform": "Linux-6.18.54.1-microsoft-standard-WSL2+-x86_64-with-glibc2.43",
+  "python": "3.14.4",
+  "query_count": 300,
+  "repeats": 2,
+  "baseline": {
+    "MVD_VECTOR_CACHE_BYTES": "16777216",
+    "MVD_BUCKETS": "32768",
+    "MVD_WAL_COMPRESSION_LEVEL": "1",
+    "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+  },
+  "measurements": [
+    {
+      "parameter": "cache_mib",
+      "value": 8,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "8388608",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.034917946500002,
+        "query_seconds": 5.291256525999998,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 27.7734375,
+        "native_scan_active": false
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": false,
+          "peak_rss_mib": 27.8125,
+          "queries": 300,
+          "query_seconds": 5.118034051999999,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0129125979999998
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": false,
+          "peak_rss_mib": 27.734375,
+          "queries": 300,
+          "query_seconds": 5.464478999999997,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0569232950000043
+        }
+      ]
+    },
+    {
+      "parameter": "cache_mib",
+      "value": 12,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "12582912",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 0.995705520499996,
+        "query_seconds": 5.012902706499997,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 27.796875,
+        "native_scan_active": false
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": false,
+          "peak_rss_mib": 27.8359375,
+          "queries": 300,
+          "query_seconds": 5.019565270999998,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.976171506
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": false,
+          "peak_rss_mib": 27.7578125,
+          "queries": 300,
+          "query_seconds": 5.006240141999996,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.015239534999992
+        }
+      ]
+    },
+    {
+      "parameter": "cache_mib",
+      "value": 13,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "13631488",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.0082763105000012,
+        "query_seconds": 0.14292366700000514,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.751953125,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.9453125,
+          "queries": 300,
+          "query_seconds": 0.13708797799999672,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.9669000890000063
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.55859375,
+          "queries": 300,
+          "query_seconds": 0.14875935600001355,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.049652531999996
+        }
+      ]
+    },
+    {
+      "parameter": "cache_mib",
+      "value": 14,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "14680064",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.0180670730000045,
+        "query_seconds": 0.14391716800000154,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.962890625,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.984375,
+          "queries": 300,
+          "query_seconds": 0.14070611399999677,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.9749215150000055
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.94140625,
+          "queries": 300,
+          "query_seconds": 0.1471282220000063,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0612126310000036
+        }
+      ]
+    },
+    {
+      "parameter": "cache_mib",
+      "value": 16,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 0.9847407934999879,
+        "query_seconds": 0.13779055099999482,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.671875,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.59765625,
+          "queries": 300,
+          "query_seconds": 0.13802849799999706,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.9810441849999876
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.74609375,
+          "queries": 300,
+          "query_seconds": 0.13755260399999258,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.9884374019999882
+        }
+      ]
+    },
+    {
+      "parameter": "cache_mib",
+      "value": 24,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "25165824",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.019016080500002,
+        "query_seconds": 0.1447994374999979,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.71484375,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.98828125,
+          "queries": 300,
+          "query_seconds": 0.15005379000000119,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0631591719999989
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.44140625,
+          "queries": 300,
+          "query_seconds": 0.13954508499999463,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.974872989000005
+        }
+      ]
+    },
+    {
+      "parameter": "buckets",
+      "value": 1024,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "1024",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.131242733999997,
+        "query_seconds": 0.14750910200000078,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.119140625,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.078125,
+          "queries": 300,
+          "query_seconds": 0.1466686229999965,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.130471455999995
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.16015625,
+          "queries": 300,
+          "query_seconds": 0.14834958100000506,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.132014011999999
+        }
+      ]
+    },
+    {
+      "parameter": "buckets",
+      "value": 2048,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "2048",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.0037255319999971,
+        "query_seconds": 0.13758022449999885,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.171875,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.203125,
+          "queries": 300,
+          "query_seconds": 0.13763842999999554,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0042888050000016
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.140625,
+          "queries": 300,
+          "query_seconds": 0.13752201900000216,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0031622589999927
+        }
+      ]
+    },
+    {
+      "parameter": "buckets",
+      "value": 4096,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "4096",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.0043594430000056,
+        "query_seconds": 0.14231900600000102,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.07421875,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.171875,
+          "queries": 300,
+          "query_seconds": 0.14563193799999397,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0183749840000047
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 31.9765625,
+          "queries": 300,
+          "query_seconds": 0.13900607400000808,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.9903439020000064
+        }
+      ]
+    },
+    {
+      "parameter": "buckets",
+      "value": 8192,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "8192",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 0.9846628230000007,
+        "query_seconds": 0.1383539524999975,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.5859375,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.51171875,
+          "queries": 300,
+          "query_seconds": 0.13791811100000473,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0024205149999972
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.66015625,
+          "queries": 300,
+          "query_seconds": 0.13878979399999025,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.9669051310000043
+        }
+      ]
+    },
+    {
+      "parameter": "buckets",
+      "value": 16384,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "16384",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.016517444999998,
+        "query_seconds": 0.14379312199999816,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.4609375,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.49609375,
+          "queries": 300,
+          "query_seconds": 0.13915223099999707,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.9815708259999951
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.42578125,
+          "queries": 300,
+          "query_seconds": 0.14843401299999925,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.051464064000001
+        }
+      ]
+    },
+    {
+      "parameter": "buckets",
+      "value": 32768,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 0.9692329874999999,
+        "query_seconds": 0.13769390899999934,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.873046875,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.9140625,
+          "queries": 300,
+          "query_seconds": 0.1367661959999964,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.9642356070000062
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.83203125,
+          "queries": 300,
+          "query_seconds": 0.13862162200000228,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.9742303679999935
+        }
+      ]
+    },
+    {
+      "parameter": "buckets",
+      "value": 65536,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "65536",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.0314184315000006,
+        "query_seconds": 0.13744066449999792,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.96875,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.93359375,
+          "queries": 300,
+          "query_seconds": 0.1378187109999942,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0230528900000024
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 33.00390625,
+          "queries": 300,
+          "query_seconds": 0.13706261800000163,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0397839729999987
+        }
+      ]
+    },
+    {
+      "parameter": "wal_level",
+      "value": 0,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "0",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 0.9432754809999935,
+        "query_seconds": 0.14415299250000402,
+        "wal_mib": 9.184794425964355,
+        "peak_rss_mib": 33.10546875,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 33.11328125,
+          "queries": 300,
+          "query_seconds": 0.14851417300000946,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 9.184794425964355,
+          "write_seconds": 0.9846325599999943
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 33.09765625,
+          "queries": 300,
+          "query_seconds": 0.13979181199999857,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 9.184794425964355,
+          "write_seconds": 0.9019184019999926
+        }
+      ]
+    },
+    {
+      "parameter": "wal_level",
+      "value": 1,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "1",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 0.9954371209999948,
+        "query_seconds": 0.14289682549999583,
+        "wal_mib": 3.967484474182129,
+        "peak_rss_mib": 32.828125,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.6796875,
+          "queries": 300,
+          "query_seconds": 0.14892568399999107,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 1.0203023159999987
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.9765625,
+          "queries": 300,
+          "query_seconds": 0.1368679670000006,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.967484474182129,
+          "write_seconds": 0.970571925999991
+        }
+      ]
+    },
+    {
+      "parameter": "wal_level",
+      "value": 2,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "2",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.0292329470000041,
+        "query_seconds": 0.14052840600000138,
+        "wal_mib": 3.8133420944213867,
+        "peak_rss_mib": 32.513671875,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.453125,
+          "queries": 300,
+          "query_seconds": 0.13766655799999228,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.8133420944213867,
+          "write_seconds": 0.9892176780000028
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.57421875,
+          "queries": 300,
+          "query_seconds": 0.1433902540000105,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.8133420944213867,
+          "write_seconds": 1.0692482160000054
+        }
+      ]
+    },
+    {
+      "parameter": "wal_level",
+      "value": 3,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "3",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.0157138625000073,
+        "query_seconds": 0.13822211249999583,
+        "wal_mib": 3.6097307205200195,
+        "peak_rss_mib": 32.6328125,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.7578125,
+          "queries": 300,
+          "query_seconds": 0.13794570800000372,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.6097307205200195,
+          "write_seconds": 1.0133318550000041
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.5078125,
+          "queries": 300,
+          "query_seconds": 0.13849851699998794,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.6097307205200195,
+          "write_seconds": 1.0180958700000104
+        }
+      ]
+    },
+    {
+      "parameter": "wal_level",
+      "value": 4,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "4",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.0200844820000015,
+        "query_seconds": 0.1377887050000055,
+        "wal_mib": 3.483684539794922,
+        "peak_rss_mib": 32.927734375,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.98828125,
+          "queries": 300,
+          "query_seconds": 0.13701154600001075,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.483684539794922,
+          "write_seconds": 1.0202565379999982
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.8671875,
+          "queries": 300,
+          "query_seconds": 0.13856586400000026,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.483684539794922,
+          "write_seconds": 1.0199124260000048
+        }
+      ]
+    },
+    {
+      "parameter": "wal_level",
+      "value": 6,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "6",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 1.2754068150000109,
+        "query_seconds": 0.14041435349999176,
+        "wal_mib": 3.177522659301758,
+        "peak_rss_mib": 32.9453125,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.9296875,
+          "queries": 300,
+          "query_seconds": 0.14189537199999336,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.177522659301758,
+          "write_seconds": 1.2771463850000089
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.9609375,
+          "queries": 300,
+          "query_seconds": 0.13893333499999017,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.177522659301758,
+          "write_seconds": 1.2736672450000128
+        }
+      ]
+    },
+    {
+      "parameter": "wal_level",
+      "value": 9,
+      "settings": {
+        "MVD_VECTOR_CACHE_BYTES": "16777216",
+        "MVD_BUCKETS": "32768",
+        "MVD_WAL_COMPRESSION_LEVEL": "9",
+        "MVD_WAL_COMPRESSION_THRESHOLD": "1024"
+      },
+      "summary": {
+        "write_seconds": 2.3636098065000013,
+        "query_seconds": 0.14831522649999584,
+        "wal_mib": 3.1644506454467773,
+        "peak_rss_mib": 32.71484375,
+        "native_scan_active": true
+      },
+      "trials": [
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 32.42578125,
+          "queries": 300,
+          "query_seconds": 0.1462523049999902,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.1644506454467773,
+          "write_seconds": 2.304618695000002
+        },
+        {
+          "batch": 100,
+          "data_mib": 5.207062721252441,
+          "dimension": 128,
+          "native_scan_active": true,
+          "peak_rss_mib": 33.00390625,
+          "queries": 300,
+          "query_seconds": 0.1503781480000015,
+          "rows": 10000,
+          "vector_cache_active": true,
+          "wal_mib": 3.1644506454467773,
+          "write_seconds": 2.4226009180000005
+        }
+      ]
+    }
+  ]
+}
