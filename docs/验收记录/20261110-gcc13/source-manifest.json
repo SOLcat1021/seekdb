@@ -1,0 +1,59 @@
+{
+  "source_commit": "9484259f3a8f94ee778d33c126a7dc054a981607",
+  "files": [
+    {
+      "path": "Dockerfile",
+      "sha256": "3916aab4f77b5a821d74ffa5f63ed54135950a6cdaa7e05063e23f1043083f5a"
+    },
+    {
+      "path": "minivector-cpp/Makefile",
+      "sha256": "024f3880029dab7702b2d951cb0124b43360efbb8b50c2b6bad74ac10cd85928"
+    },
+    {
+      "path": "minivector-cpp/src/engine.cpp",
+      "sha256": "5aca1110bba8dbc2fe70accf863996a7f8309cab28cff64fd8c80882ad2e3d86"
+    },
+    {
+      "path": "minivector-cpp/src/engine.h",
+      "sha256": "1c3723939500e7fadb6944ec717c17b9f221803906f07ed377cf5f85501a0b84"
+    },
+    {
+      "path": "minivector-cpp/src/exact_scan.h",
+      "sha256": "48f5534d483e6f6cc17d6b8e5b273c6556b1ff56a53e320e9e06d6a26f142129"
+    },
+    {
+      "path": "minivector-cpp/src/main.cpp",
+      "sha256": "68ab15e5f7a61ebb7595bd7bb98d6e1b91a133aabd4ff771ce357b67e9e04850"
+    },
+    {
+      "path": "minivector-cpp/src/sql.cpp",
+      "sha256": "736e7a96beb8f1286b0c1c88877521ffee449c91dced946980e9b01930facf19"
+    },
+    {
+      "path": "minivector-cpp/src/sql.h",
+      "sha256": "aace306951f4b6fc1cbeebaa05da7288db1dd49b883aea5fa358002f0bf06f5c"
+    },
+    {
+      "path": "minivector-cpp/src/storage.cpp",
+      "sha256": "f80e0dc03f30a1529ba73dadffbfee54f2dff2821263a55cd2c849b3fa18059d"
+    },
+    {
+      "path": "minivector-cpp/src/storage.h",
+      "sha256": "2b4a327c360bfedb01eceef4c6aba9dcdbea0702406e13b095a11af7cffdb7ee"
+    },
+    {
+      "path": "minivector-cpp/src/text_scan.h",
+      "sha256": "adbcf1658247a47aeb8d5ad9bc8432de5942bf9fbf5ff599238af79cf8429b9c"
+    },
+    {
+      "path": "minivector-cpp/src/util.cpp",
+      "sha256": "363acf26694d6174adb66a60852f07e6b25bfdc849671507b6fcca72f81700ef"
+    },
+    {
+      "path": "minivector-cpp/src/util.h",
+      "sha256": "297a8ca6d6ef48a88365552432cf1e30315debcff0ca5978eb67c8a8d57241f7"
+    }
+  ],
+  "agent_bytes": 3,
+  "agent_json": {}
+}

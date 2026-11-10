@@ -1,0 +1,13 @@
+{
+  "scope": "public-protocol-check",
+  "passed": true,
+  "cases": [
+    {
+      "id": "handshake",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 1334
+    }
+  ],
+  "note": "Local diagnostic only; no performance/Agent scores or platform callbacks."
+}

@@ -1,0 +1,28 @@
+{
+  "source_commit": "9484259f3a8f94ee778d33c126a7dc054a981607",
+  "image_id": "sha256:48c6e835f11ad44f98ca225f9b46406d86f2ffdedef099f7f7711edc03d8f168",
+  "image_tag": "mvd-exact-release:20261110-gcc13",
+  "binary_sha256": "213fda000f141f239d7ea31cdd4f44f454ba2263ab7bac5f0bf4c0228570af06",
+  "base_images": [
+    {
+      "id": "sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e",
+      "digests": [
+        "gcc@sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e"
+      ]
+    },
+    {
+      "id": "sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc",
+      "digests": [
+        "debian@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc"
+      ]
+    }
+  ],
+  "agent_conversation": "empty object, 3 UTF-8 bytes",
+  "platform_submission": "not performed",
+  "limitations": [
+    "Repeated kill during recovery not tested in this release",
+    "Out-of-memory system and transaction spill acceptance not completed",
+    "Extracted-binary regression tests do not have Docker resource isolation",
+    "No GCC13 performance comparison performed"
+  ]
+}

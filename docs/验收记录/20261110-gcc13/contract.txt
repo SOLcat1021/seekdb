@@ -1,0 +1,1 @@
+PASS JSONL contract: typed IDs, Unicode/semicolon, mode, error continuation, shutdown/recovery

@@ -1,4 +1,14 @@
-# MiniVectorDB 本地原型
+# MiniVectorDB：C++ 精确查询优化候选
+
+当前根 Dockerfile 使用 GCC13 构建 `minivector-cpp/`，运行入口为 `/usr/local/bin/minivector --data /data`，通过正式 JSONL 协议通信。发布源码固定自工作候选 `9484259f3a8f94ee778d33c126a7dc054a981607`：直接差平方安全筛选、补偿 double 精算、按距离和主键排序，以及 JSON/SQL 解析优化；本次不继续修改引擎算法。
+
+`agent/conversation.json` 按用户要求提交空对象 `{}`，不含学习证据。它与源码、Dockerfile 一起纳入本次提交。
+
+构建：`docker build -t minivectordb:release .`。验证结果及限制见 `docs/发布验收_20261110.md`；公开测试通过不等于正式评测通过。
+
+以下为旧 Python 原型的历史说明。旧文件保留供追溯，根 Dockerfile 不构建或运行它们，旧测试结果不作为本次 C++ 候选的验收证据。
+
+## 旧 Python 原型说明（历史）
 
 实现规划见 [PLAN.md](PLAN.md)。当前程序自行实现了限定 SQL 的解析与执行、精确 L2 检索、事务回滚、带校验的提交日志，以及二进制磁盘记录和内存主键哈希桶目录。数据库保存在 `--data-dir` 指定目录。查询优化包括主键等值条件直接定位、顺序扫描跳过旧版本、受限向量缓存，以及自研 C++ 精确 TopK 扫描。写入路径复用已验证的变更，WAL 大帧采用压缩格式，并兼容旧的未压缩帧；不再写入重启时从不读取的 `.idx` 文件。原生库缺失或缓存不足时自动回退到 Python 精确扫描。`CREATE VECTOR INDEX` 目前只验证语法，尚未建立近似索引；ANN 公开样例由精确检索满足。
 
