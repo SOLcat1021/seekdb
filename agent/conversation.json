@@ -1,10 +1,10 @@
 {
-  "version": "minivectordb-learning-record-3",
+  "version": "minivectordb-learning-record-4",
   "synthetic": false,
   "scope": {
     "project": "OceanBase MiniVectorDB 加赛",
     "through_date": "2026-11-11",
-    "notes": "本文件记录可核对的用户提问、Agent 判断、本地实验和早期平台反馈。用户原话限于可查对话。旧稿中的转述不作为学生原话或独立贡献证据。实验由 Agent 通过工具执行，学生是否亲自操作或解释结果仅按原话记录。JSON 内已包含结果节选，来源标签只用于溯源。",
+    "notes": "本文件记录可核对的用户提问、Agent 判断、本地实验和早期平台反馈。用户原话限于可查对话。旧稿中的转述不作为学生原话或独立贡献证据。实验由 Agent 通过工具执行，学生是否亲自操作或解释结果仅按原话记录。JSON 内已包含结果节选，来源标签只用于溯源。 新增学生在看到复测结果后的原话，分别关联批量 INSERT、JSONL 响应上限、大事务提交和跨表崩溃恢复证据。 Python 版 checkpoint 恢复和耗时数据来自对应历史提交保留的实测输出，并标注了当时的版本。 补充学生对 Python 版 checkpoint 的事后取舍，以及学生先提出反例和预期、Agent 随后本地运行的精确 TopK 记录。",
     "source_revision": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
     "redaction": "仅摘取与赛题相关的内容。省略账号、认证信息、会话标识、无关聊天和内部推理。工具结果按字段节选或序列化，去掉临时目录和无关请求编号。"
   },
@@ -94,6 +94,39 @@
       "attribution": "verbatim",
       "origin": "本赛题对话中用户直接发送的文字",
       "content": "那你按题面要求把我们的 agent/conversation.json 改一版吧，区分我的原话、Agent 的判断和实际工具输出，把证据引用都核对一遍，没做过的别写成已验证。"
+    },
+    {
+      "id": "a08",
+      "source": "agent",
+      "attribution": "verbatim",
+      "origin": "本赛题对话中 Agent 发出的三项复盘问题节选",
+      "content": "旧版插入 4,100 行时，只写进第 4,096 和第 4,100 行。这个现象让你先怀疑哪一步？你怎么看这次修法，复测时什么结果能让你相信数据真的写齐了？\n156,000 行的响应是 16,692,054 字节，低于 16 MiB，旧版却拒绝了。你怎么判断该改哪里？修复后，哪项边界结果最能说明问题解决了？\n在 96 MiB 限制下，旧版写入 9 万条向量后，在 `COMMIT` 时被 OOM 杀掉。修复后，单表和跨表都能提交，强杀重启后也能读回。你怎么看出问题集中在哪一步？这次复测让你确认了什么，还有什么值得单独验证？"
+    },
+    {
+      "id": "u09",
+      "source": "student",
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的完整回复",
+      "timing": "retrospective",
+      "content": "现在回看：1. 4096 和 4100 刚好是两个分块的最后一行，我会先查分块解析，复测要逐个核对主键，再看遇到重复键会不会留下半批数据。2. 实际字节数没超，应该修估算，卡着上限测，刚好到上限能过，多一个字节就拒绝。3. 写入没挂，COMMIT 才挂，我会先看提交时是不是又把整批数据读进内存。提交成功后强杀能读回，只验证了这个时点，我还想看跨表提交到一半被杀会不会只恢复一张表。"
+    },
+    {
+      "id": "a09",
+      "source": "agent",
+      "attribution": "verbatim",
+      "origin": "本赛题对话中 Agent 发出的 checkpoint 与 TopK 提问节选",
+      "content": "你怎么看这个取舍？什么场景下你会接受首查变慢？\n你会怎样构造一个反例，检验固定数量的粗筛候选会不会漏掉真正的最近邻？请给出查询向量、数据构造规则、`K` 和预期返回的主键顺序。数据量大可以用公式描述。"
+    },
+    {
+      "id": "u10",
+      "source": "student",
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的完整回复",
+      "timing": {
+        "1": "retrospective",
+        "2": "before_local_experiment_e12"
+      },
+      "content": "1. 我觉得这次取舍能接受，首查虽然慢了约 0.1 秒，但重启到查出第一条结果的总时间还是短了，尤其适合需要快速恢复的场景。2. TopK 用查询向量 [100000000,0]，主键 1 到 100 都放 [100000000,1]，主键 101 放 [100000000,0]，K=1，预期只返回 101，距离为 0。点积展开可能把距离都算成 0，如果按主键截前 65 个，就会漏掉 101。你跑一下，把我的原话和实际输出一起记进去。"
     }
   ],
   "platform_feedback": [
@@ -144,7 +177,9 @@
       },
       "method": "本地同一 JSONL 驱动。先写入一条基准行，再发约 1.15 MB、4100 行的一条 INSERT。分别核对自动提交、显式事务、重复键、非法尾部、尺寸越界和强杀回读。朋友镜像由相同提交源码本地构建。",
       "artifact": "minivectordb_correctness_diff_20261111.json 与 minivectordb_correctness_bounded_commit_20261111.json",
-      "output": "{\"before\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":2},\"matches\":false},\"bulk_ids\":{\"expected_count\":4101,\"actual_count\":3,\"head\":[0,4096,4100],\"tail\":[0,4096,4100],\"matches\":false},\"txn_bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":2},\"matches\":false},\"txn_bulk_first_row\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[]},\"matches\":false},\"bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"bulk_duplicate_atomicity\":{\"expected\":{\"ok\":true,\"rows\":[[0]]},\"actual\":{\"ok\":true,\"rows\":[[0],[4096],[4100]]},\"matches\":false},\"bulk_extra_statement_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"bulk_trailing_comma_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"txn_bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"varchar_length_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"vector_dimension_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"committed_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[]},\"matches\":false},\"committed_txn_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[]},\"matches\":false}},\"friend\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"bulk_ids\":{\"expected_count\":4101,\"actual_count\":4101,\"head\":[0,1,2,3,4,5,6,7],\"tail\":[4093,4094,4095,4096,4097,4098,4099,4100],\"matches\":true},\"txn_bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"txn_bulk_first_row\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_duplicate_atomicity\":{\"expected\":{\"ok\":true,\"rows\":[[0]]},\"actual\":{\"ok\":true,\"rows\":[[0]]},\"matches\":true},\"bulk_extra_statement_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_trailing_comma_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"txn_bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"varchar_length_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"vector_dimension_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"committed_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"committed_txn_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true}},\"after\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"bulk_ids\":{\"expected_count\":4101,\"actual_count\":4101,\"head\":[0,1,2,3,4,5,6,7],\"tail\":[4093,4094,4095,4096,4097,4098,4099,4100],\"matches\":true},\"txn_bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"txn_bulk_first_row\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_duplicate_atomicity\":{\"expected\":{\"ok\":true,\"rows\":[[0]]},\"actual\":{\"ok\":true,\"rows\":[[0]]},\"matches\":true},\"bulk_extra_statement_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_trailing_comma_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"txn_bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"varchar_length_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"vector_dimension_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"committed_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"committed_txn_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true}}}"
+      "output": "{\"before\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":2},\"matches\":false},\"bulk_ids\":{\"expected_count\":4101,\"actual_count\":3,\"head\":[0,4096,4100],\"tail\":[0,4096,4100],\"matches\":false},\"txn_bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":2},\"matches\":false},\"txn_bulk_first_row\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[]},\"matches\":false},\"bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"bulk_duplicate_atomicity\":{\"expected\":{\"ok\":true,\"rows\":[[0]]},\"actual\":{\"ok\":true,\"rows\":[[0],[4096],[4100]]},\"matches\":false},\"bulk_extra_statement_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"bulk_trailing_comma_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"txn_bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"varchar_length_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"vector_dimension_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"committed_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[]},\"matches\":false},\"committed_txn_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[]},\"matches\":false}},\"friend\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"bulk_ids\":{\"expected_count\":4101,\"actual_count\":4101,\"head\":[0,1,2,3,4,5,6,7],\"tail\":[4093,4094,4095,4096,4097,4098,4099,4100],\"matches\":true},\"txn_bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"txn_bulk_first_row\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_duplicate_atomicity\":{\"expected\":{\"ok\":true,\"rows\":[[0]]},\"actual\":{\"ok\":true,\"rows\":[[0]]},\"matches\":true},\"bulk_extra_statement_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_trailing_comma_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"txn_bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"varchar_length_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"vector_dimension_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"committed_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"committed_txn_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true}},\"after\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"bulk_ids\":{\"expected_count\":4101,\"actual_count\":4101,\"head\":[0,1,2,3,4,5,6,7],\"tail\":[4093,4094,4095,4096,4097,4098,4099,4100],\"matches\":true},\"txn_bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"txn_bulk_first_row\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_duplicate_atomicity\":{\"expected\":{\"ok\":true,\"rows\":[[0]]},\"actual\":{\"ok\":true,\"rows\":[[0]]},\"matches\":true},\"bulk_extra_statement_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_trailing_comma_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"txn_bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"varchar_length_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"vector_dimension_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"committed_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"committed_txn_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true}}}",
+      "verified_assertions": "{\"旧版实际主键\":[0,4096,4100],\"修复后完整主键序列与预期一致\":true,\"修复后总行数含基准行\":4101,\"修复后重复键语句被拒绝\":true,\"重复键错误后实际主键\":[0]}",
+      "verified_assertions_source": "从本地差分原始结果的 bulk_ids、bulk_duplicate_rejected 和 bulk_duplicate_atomicity 提取。主键 0 是预写入的基准行。"
     },
     {
       "id": "e04",
@@ -158,7 +193,9 @@
       },
       "method": "对 15.6 万行结果独立计算紧凑 JSONL 字节数，计入换行。修复后同时核对小响应恰好等于上限、少一字节上限，以及默认上限下真实超限。",
       "artifact": "minivectordb_wire_budget_20261111.json 与 minivectordb_bounded_commit_regression_20261111.json",
-      "output": "{\"before\":{\"limit\":16777216,\"expected_wire_bytes\":16692054,\"row_count\":156000,\"actual_response\":{\"id\":\"size-edge\",\"ok\":false,\"error\":{\"code\":\"response_too_large\",\"message\":\"response exceeds the response byte limit\"}}},\"after\":{\"exact_limit\":394,\"default_wire_bytes\":16692054,\"large_rows\":156000,\"over_limit_rejected\":true}}"
+      "output": "{\"before\":{\"limit\":16777216,\"expected_wire_bytes\":16692054,\"row_count\":156000,\"actual_response\":{\"id\":\"size-edge\",\"ok\":false,\"error\":{\"code\":\"response_too_large\",\"message\":\"response exceeds the response byte limit\"}}},\"after\":{\"exact_limit\":394,\"default_wire_bytes\":16692054,\"large_rows\":156000,\"over_limit_rejected\":true}}",
+      "verified_assertions": "{\"响应字节数含换行\":394,\"上限等于响应字节数\":{\"limit\":394,\"response_matches_expected\":true},\"上限比响应少一字节\":{\"limit\":393,\"error\":\"response_too_large\"}}",
+      "verified_assertions_source": "依据本地回归结果 response_boundary 与同次运行脚本的 response_boundary 断言提取。对同一条完整响应分别设置 394 和 393 字节上限。"
     },
     {
       "id": "e05",
@@ -187,7 +224,9 @@
       },
       "method": "在提交标记前后、跨表重做发布前后、第一张表应用后，以及旧格式跨表日志场景注入进程终止。每个场景第二次启动仍注入终止，第三次启动比较两表的完整主键结果。committed 表示断言通过后的预期可见状态，false 表示未提交的数据全部回滚。",
       "artifact": "minivectordb_bounded_commit_regression_20261111.json",
-      "output": "{\"single_before_commit\":{\"fault\":\"statement_before_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"single_after_commit\":{\"fault\":\"statement_after_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":true,\"legacy_log\":false},\"cross_before_publish\":{\"fault\":\"cross_txn_log_chunk\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"cross_after_publish\":{\"fault\":\"cross_txn_after_log\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"cross_after_first_table\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"legacy_cross_log\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":true}}"
+      "output": "{\"single_before_commit\":{\"fault\":\"statement_before_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"single_after_commit\":{\"fault\":\"statement_after_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":true,\"legacy_log\":false},\"cross_before_publish\":{\"fault\":\"cross_txn_log_chunk\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"cross_after_publish\":{\"fault\":\"cross_txn_after_log\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"cross_after_first_table\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"legacy_cross_log\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":true}}",
+      "verified_assertions": "{\"跨表提交应用完第一张表时强杀并在恢复途中再次强杀\":{\"两次退出码\":[137,137],\"第三次启动两表主键各为\":\"0–4100，逐项相等\",\"每表已恢复事务行数\":4100},\"跨表重做发布前强杀并在恢复途中再次强杀\":{\"第三次启动两表实际主键\":{\"a\":[0],\"b\":[0]}}}",
+      "verified_assertions_source": "依据本地回归结果 cross_after_first_table、cross_before_publish 与同次运行脚本的 crash_commit 断言提取。主键 0 是预写入的基准行。"
     },
     {
       "id": "e07",
@@ -221,6 +260,54 @@
       "method": "本次整理时由 Agent 重跑。写入主键 42、中文和二维向量后读取段文件，检查 magic、payload 长度、CRC32、float32 字节，以及测试 SQL 文本未出现在该段。随后正常重启并核对整行。",
       "artifact": "minivectordb_learning_evidence_recheck_20261111.json",
       "output": "{\"magic\":\"0x4d564442\",\"flags\":0,\"payload_bytes\":48,\"crc32_match\":true,\"contains_test_sql_text\":false,\"vector_float32_bytes\":\"0000803e0000c0bf\",\"after_restart\":[[42,\"二进制记录\",[0.25,-1.5]]]}"
+    },
+    {
+      "id": "e10",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "Python 版 checkpoint 与 WAL 截断的故障注入",
+      "source_revision": {
+        "checkpoint": "a9ad3b0a421a9dfa8e424f5f10cdd816b4c9f4a1",
+        "wal_only": "76e637dc8bff571a7f6d6f492712054fd06a9310"
+      },
+      "method": "历史测试运行记录。用旧版 WAL 建数据后，用 checkpoint 版验证 WAL 迁移与截断、重放中连续两次终止、checkpoint 发布前后以及 WAL 替换后的终止与后续写入。",
+      "artifact": "a9ad3b0a421a9dfa8e424f5f10cdd816b4c9f4a1:agent/conversation.json，历史实验 e06 的输出原文",
+      "output": "PASS legacy WAL migration and checkpoint truncation: 4123 -> 24 bytes\nPASS two kills after partial tail replay, complete transaction after restart, torn tail removed\nPASS kills before and after checkpoint publication and after WAL replacement, including later writes"
+    },
+    {
+      "id": "e11",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "Python 版 checkpoint 前后的启动耗时与首次精确 TopK",
+      "source_revision": {
+        "before": "76e637dc8bff571a7f6d6f492712054fd06a9310",
+        "after": "a9ad3b0a421a9dfa8e424f5f10cdd816b4c9f4a1"
+      },
+      "method": "历史测试运行记录。WSL ext4，同一固定种子的 30,000 条 128 维向量，每批 100 行，交替五轮，分别计新进程的引擎初始化与首次精确 TopK。未主动清理本地文件系统缓存；每轮核对 TopK 返回主键一致。",
+      "artifact": "a9ad3b0a421a9dfa8e424f5f10cdd816b4c9f4a1:agent/conversation.json，历史实验 e07 的输出原文",
+      "output": "Median initialization: 1.7309 s -> 0.4019 s. WAL: 10975931 -> 2562161 bytes. First exact TopK: 0.1586 s -> 0.2627 s, same returned keys."
+    },
+    {
+      "id": "e12",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具，收到学生反例和预期后执行",
+      "purpose": "学生构造的近等大数反例，验证精确 TopK 并复现固定候选截断漏检",
+      "source_revision": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
+      "method": "用提交仓库的 GCC13 Dockerfile 构建，在 WSL Docker 中通过 JSONL 入口运行。创建 (id BIGINT PRIMARY KEY, v VECTOR(2))，主键 1 到 100 的向量为 [100000000,1]，101 为 [100000000,0]，按主键升序插入，执行学生给出的 K=1 查询。独立标量真值将坐标转为 float32 后直接做差，用 math.fsum 累计差的平方。另用 Python binary64 模拟点积展开，按粗分和主键截到 65 项后用标量真值重排。模拟是独立工具计算，数据库运行的是 exact 查询。",
+      "environment": {
+        "image_id": "sha256:d93a5ee51ca71162663ea55624c029e165e1315e6f11af4921b9be06340a3048",
+        "cpus": 2,
+        "memory": "2 GiB",
+        "network": "none"
+      },
+      "request": "{\"id\":\"topk\",\"op\":\"execute\",\"mode\":\"exact\",\"sql\":\"SELECT id, L2_DISTANCE(v,'[100000000,0]') AS d FROM topk_counterexample ORDER BY d LIMIT 1;\"}",
+      "output": "{\"type\":\"ready\"}\n{\"id\":\"create\",\"ok\":true}\n{\"id\":\"insert\",\"ok\":true,\"affected_rows\":101}\n{\"id\":\"topk\",\"ok\":true,\"columns\":[\"id\",\"d\"],\"rows\":[[101,0]]}\n{\"id\":\"shutdown\",\"ok\":true}",
+      "scalar_oracle_output": "{\"method\":\"float32 coordinates; direct differences; math.fsum of squared differences; (distance_squared, id) ranking\",\"top1\":[[101,0]],\"distance_for_ids_1_to_100\":1}",
+      "dot_expansion_simulation_output": "{\"unique_rough_distance_squared\":[0],\"zero_count\":101,\"candidate_limit\":65,\"candidate_first_id\":1,\"candidate_last_id\":65,\"contains_id_101\":false,\"reranked_top1\":[[1,1]]}",
+      "actual_matches_oracle": true
     }
   ],
   "source_reviews": [
@@ -278,12 +365,8 @@
     {
       "id": "plan01",
       "source": "agent",
-      "status": "planned",
-      "content": "用户早期要求比较 checkpoint 与 WAL 截断前后的启动耗时。此文件的六组故障验证只核对恢复结果，未附一组针对这次最终候选、同条件的启动耗时对照。",
-      "student_request": {
-        "pointer": "/conversations/3/content",
-        "quote": "好，按这个顺序做吧，先实现 checkpoint 和 WAL 截断，测一下重启过程中再次强杀能不能恢复，再对比优化前后的启动耗时。半小时内完成然后提测一次"
-      }
+      "status": "not_run_in_this_record",
+      "content": "Python 版 checkpoint 前后的对照见 e11。当前 C++ 候选的故障注入验证了恢复正确性，本材料未包含该候选同条件的启动耗时对照。"
     },
     {
       "id": "plan02",
@@ -333,16 +416,37 @@
         {
           "pointer": "/conversations/3/content",
           "quote": "好，按这个顺序做吧，先实现 checkpoint 和 WAL 截断，测一下重启过程中再次强杀能不能恢复，再对比优化前后的启动耗时。半小时内完成然后提测一次"
+        },
+        {
+          "pointer": "/conversations/16/content",
+          "quote": "1. 我觉得这次取舍能接受，首查虽然慢了约 0.1 秒，但重启到查出第一条结果的总时间还是短了，尤其适合需要快速恢复的场景。"
         }
       ],
       "result_evidence": [
         {
-          "pointer": "/experiments/5/output",
-          "quote": "\"cross_after_first_table\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true"
+          "pointer": "/experiments/9/output",
+          "quote": "PASS legacy WAL migration and checkpoint truncation: 4123 -> 24 bytes"
+        },
+        {
+          "pointer": "/experiments/9/output",
+          "quote": "PASS two kills after partial tail replay, complete transaction after restart, torn tail removed"
+        },
+        {
+          "pointer": "/experiments/9/output",
+          "quote": "PASS kills before and after checkpoint publication and after WAL replacement, including later writes"
+        },
+        {
+          "pointer": "/experiments/10/output",
+          "quote": "Median initialization: 1.7309 s -> 0.4019 s. WAL: 10975931 -> 2562161 bytes. First exact TopK: 0.1586 s -> 0.2627 s, same returned keys."
         }
       ],
-      "agent_context": [],
-      "note": "这里关联后来版本对重复恢复的验证。启动耗时对照另列为未执行的计划。"
+      "agent_context": [
+        {
+          "pointer": "/conversations/15/content",
+          "quote": "你怎么看这个取舍？什么场景下你会接受首查变慢？"
+        }
+      ],
+      "note": "这条学生请求关联当时 Python 版的恢复故障注入和耗时对照。C++ 版的跨表提交与恢复证据见 q08。 学生在复盘时从恢复到首次查询的整体体验解释其取舍。旧实验分别计引擎初始化和首个 TopK 请求，二者之间有主键回读校验。两段各有中位数，旧记录没有逐轮端到端的中位数。"
     },
     {
       "id": "q04",
@@ -380,6 +484,10 @@
         {
           "pointer": "/conversations/6/content",
           "quote": "这一版又没通过，比较一下我们和朋友的那个版本，到底还有啥正确性是没考虑到的"
+        },
+        {
+          "pointer": "/conversations/14/content",
+          "quote": "现在回看：1. 4096 和 4100 刚好是两个分块的最后一行，我会先查分块解析，复测要逐个核对主键，再看遇到重复键会不会留下半批数据。"
         }
       ],
       "result_evidence": [
@@ -390,14 +498,23 @@
         {
           "pointer": "/experiments/2/output",
           "quote": "\"after\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true}"
+        },
+        {
+          "pointer": "/experiments/2/verified_assertions",
+          "quote": "{\"旧版实际主键\":[0,4096,4100],\"修复后完整主键序列与预期一致\":true,\"修复后总行数含基准行\":4101,\"修复后重复键语句被拒绝\":true,\"重复键错误后实际主键\":[0]}"
         }
       ],
       "agent_context": [
         {
           "pointer": "/conversations/7/content",
           "quote": "用同一条大 INSERT 在两个镜像里核对返回行数与实际主键。Agent 在分块解析器发现起点被逐行覆盖，导致块中只解析末行，并发现长度转换缺少范围检查。朋友版本仅作为本地差分参照，结论以明确的语句语义和预期值判断。"
+        },
+        {
+          "pointer": "/conversations/13/content",
+          "quote": "旧版插入 4,100 行时，只写进第 4,096 和第 4,100 行。这个现象让你先怀疑哪一步？你怎么看这次修法，复测时什么结果能让你相信数据真的写齐了？"
         }
-      ]
+      ],
+      "note": "学生在复盘时提出逐个核对主键和检查重复键错误后的语句原子性。本地工具已核对全部主键及失败后留下的基准行。"
     },
     {
       "id": "q06",
@@ -405,6 +522,10 @@
         {
           "pointer": "/conversations/8/content",
           "quote": "再快速检查一下有没有什么漏洞，我准备几分钟后提"
+        },
+        {
+          "pointer": "/conversations/14/content",
+          "quote": "2. 实际字节数没超，应该修估算，卡着上限测，刚好到上限能过，多一个字节就拒绝。"
         }
       ],
       "result_evidence": [
@@ -417,12 +538,8 @@
           "quote": "\"default_wire_bytes\":16692054,\"large_rows\":156000,\"over_limit_rejected\":true"
         },
         {
-          "pointer": "/experiments/4/output",
-          "quote": "\"error_stage\":\"commit\",\"error\":\"database exited before response\",\"container_state\":\"true 137\""
-        },
-        {
-          "pointer": "/experiments/4/output",
-          "quote": "\"cross_table\":{\"limit\":\"96m\",\"tables\":2,\"inserted\":90000,\"survivors_after_sigkill\":89998}"
+          "pointer": "/experiments/3/verified_assertions",
+          "quote": "{\"响应字节数含换行\":394,\"上限等于响应字节数\":{\"limit\":394,\"response_matches_expected\":true},\"上限比响应少一字节\":{\"limit\":393,\"error\":\"response_too_large\"}}"
         }
       ],
       "agent_context": [
@@ -433,9 +550,13 @@
         {
           "pointer": "/conversations/11/content",
           "quote": "Agent 实施修复并运行复测。单表使用原有提交标记，跨表将完整重做文件同步并发布，再按块应用。JSONL 收集阶段使用下界提前拒绝，最终由编码器检查完整物理行。"
+        },
+        {
+          "pointer": "/conversations/13/content",
+          "quote": "156,000 行的响应是 16,692,054 字节，低于 16 MiB，旧版却拒绝了。你怎么判断该改哪里？修复后，哪项边界结果最能说明问题解决了？"
         }
       ],
-      "note": "用户要求复查并在下一条消息授权修复。实验、判断和代码修改由 Agent 执行。",
+      "note": "用户当时要求复查并授权修复。学生在复盘时提出用实际字节数验证边界。工具用同一条响应核对恰好等于上限与超出上限一字节。",
       "followup_request": {
         "pointer": "/conversations/10/content",
         "quote": "把这些都修复了吧"
@@ -460,6 +581,75 @@
       ],
       "agent_context": [],
       "note": "历史提问原话未核实。本轮有真实工具结果，不声称已取得该实验的学生原话。"
+    },
+    {
+      "id": "q08",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/14/content",
+          "quote": "3. 写入没挂，COMMIT 才挂，我会先看提交时是不是又把整批数据读进内存。提交成功后强杀能读回，只验证了这个时点，我还想看跨表提交到一半被杀会不会只恢复一张表。"
+        }
+      ],
+      "result_evidence": [
+        {
+          "pointer": "/experiments/4/output",
+          "quote": "\"error_stage\":\"commit\",\"error\":\"database exited before response\",\"container_state\":\"true 137\""
+        },
+        {
+          "pointer": "/experiments/4/output",
+          "quote": "\"cross_table\":{\"limit\":\"96m\",\"tables\":2,\"inserted\":90000,\"survivors_after_sigkill\":89998}"
+        },
+        {
+          "pointer": "/experiments/4/output",
+          "quote": "\"single_table\":{\"limit\":\"96m\",\"tables\":1,\"inserted\":90000,\"survivors_after_sigkill\":89999}"
+        },
+        {
+          "pointer": "/experiments/5/verified_assertions",
+          "quote": "{\"跨表提交应用完第一张表时强杀并在恢复途中再次强杀\":{\"两次退出码\":[137,137],\"第三次启动两表主键各为\":\"0–4100，逐项相等\",\"每表已恢复事务行数\":4100},\"跨表重做发布前强杀并在恢复途中再次强杀\":{\"第三次启动两表实际主键\":{\"a\":[0],\"b\":[0]}}}"
+        }
+      ],
+      "agent_context": [
+        {
+          "pointer": "/conversations/13/content",
+          "quote": "在 96 MiB 限制下，旧版写入 9 万条向量后，在 `COMMIT` 时被 OOM 杀掉。修复后，单表和跨表都能提交，强杀重启后也能读回。你怎么看出问题集中在哪一步？这次复测让你确认了什么，还有什么值得单独验证？"
+        }
+      ],
+      "related_request": "q06",
+      "note": "学生将提交成功后的强杀回读与提交过程中的跨表原子性区分开，并提出后者作为要检查的问题。另一次已有的本地故障注入覆盖了跨表提交应用完第一张表的时点和跨表重做发布前的时点，均由 Agent 执行。"
+    },
+    {
+      "id": "q09",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/16/content",
+          "quote": "2. TopK 用查询向量 [100000000,0]，主键 1 到 100 都放 [100000000,1]，主键 101 放 [100000000,0]，K=1，预期只返回 101，距离为 0。点积展开可能把距离都算成 0，如果按主键截前 65 个，就会漏掉 101。"
+        }
+      ],
+      "result_evidence": [
+        {
+          "pointer": "/experiments/11/output",
+          "quote": "{\"id\":\"insert\",\"ok\":true,\"affected_rows\":101}"
+        },
+        {
+          "pointer": "/experiments/11/output",
+          "quote": "{\"id\":\"topk\",\"ok\":true,\"columns\":[\"id\",\"d\"],\"rows\":[[101,0]]}"
+        },
+        {
+          "pointer": "/experiments/11/scalar_oracle_output",
+          "quote": "\"top1\":[[101,0]],\"distance_for_ids_1_to_100\":1"
+        },
+        {
+          "pointer": "/experiments/11/dot_expansion_simulation_output",
+          "quote": "{\"unique_rough_distance_squared\":[0],\"zero_count\":101,\"candidate_limit\":65,\"candidate_first_id\":1,\"candidate_last_id\":65,\"contains_id_101\":false,\"reranked_top1\":[[1,1]]}"
+        }
+      ],
+      "agent_context": [
+        {
+          "pointer": "/conversations/15/content",
+          "quote": "你会怎样构造一个反例，检验固定数量的粗筛候选会不会漏掉真正的最近邻？请给出查询向量、数据构造规则、`K` 和预期返回的主键顺序。数据量大可以用公式描述。"
+        }
+      ],
+      "note": "学生在运行前给出输入、预期和漏检机制。Agent 用原始 JSONL 响应、独立真值和固定 65 个候选的模拟核对该预测。此次验证覆盖给定的二维反例。"
     }
   ]
 }
