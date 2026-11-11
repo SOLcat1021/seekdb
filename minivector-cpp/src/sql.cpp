@@ -508,16 +508,16 @@ private:
                     expect(TK::LParen);
                     uint64_t length = parse_unsigned_int();
                     expect(TK::RParen);
-                    if (length == 0) {
-                        fail_syntax("VARCHAR length must be positive");
+                    if (length == 0 || length > std::numeric_limits<uint32_t>::max()) {
+                        fail_syntax("VARCHAR length is out of range");
                     }
                     column.type = ColumnType::varchar(static_cast<uint32_t>(length));
                 } else if (iequals(type_name, "VECTOR")) {
                     expect(TK::LParen);
                     uint64_t dim = parse_unsigned_int();
                     expect(TK::RParen);
-                    if (dim == 0) {
-                        fail_syntax("VECTOR dimension must be positive");
+                    if (dim == 0 || dim > std::numeric_limits<uint32_t>::max()) {
+                        fail_syntax("VECTOR dimension is out of range");
                     }
                     column.type = ColumnType::vector(static_cast<uint32_t>(dim));
                 } else {
@@ -1125,7 +1125,6 @@ bool for_each_insert_chunk(
 
     size_t batch_start = cursor;
     size_t row_count = 0;
-    bool any = false;
     while (cursor < sql.size()) {
         if (sql[cursor] != '(') {
             return false;
@@ -1173,39 +1172,46 @@ bool for_each_insert_chunk(
             return false;
         }
         ++row_count;
-        any = true;
         while (cursor < sql.size() &&
                std::isspace(static_cast<unsigned char>(sql[cursor]))) {
             ++cursor;
         }
-        bool chunk_full = row_count % rows_per_chunk == 0;
-        bool at_end = cursor >= sql.size() || sql[cursor] == ';';
+        const bool chunk_full = row_count == rows_per_chunk;
+        const bool at_end = cursor == sql.size() || sql[cursor] == ';';
+        const size_t chunk_end = cursor;
+        if (at_end) {
+            // Match the ordinary parser: only whitespace and semicolons may
+            // follow the last VALUES row. Anything else needs full parsing.
+            while (cursor < sql.size() &&
+                   (sql[cursor] == ';' ||
+                    std::isspace(static_cast<unsigned char>(sql[cursor])))) {
+                ++cursor;
+            }
+            if (cursor != sql.size()) {
+                return false;
+            }
+        } else if (sql[cursor] != ',') {
+            return false;
+        }
         if (chunk_full || at_end) {
             std::string chunk = prefix + " " +
-                                sql.substr(batch_start, cursor - batch_start);
+                                sql.substr(batch_start, chunk_end - batch_start);
             if (!callback(chunk)) {
                 return false;
             }
-            batch_start = cursor;
             row_count = 0;
         }
         if (at_end) {
-            ++cursor;
-            break;
-        }
-        if (sql[cursor] != ',') {
-            return false;
+            return true;
         }
         ++cursor;
         while (cursor < sql.size() &&
                std::isspace(static_cast<unsigned char>(sql[cursor]))) {
             ++cursor;
         }
-        batch_start = cursor;
+        if (chunk_full) {
+            batch_start = cursor;
+        }
     }
-    while (cursor < sql.size() &&
-           std::isspace(static_cast<unsigned char>(sql[cursor]))) {
-        ++cursor;
-    }
-    return any && (cursor == sql.size() || sql[cursor] == ';');
+    return false;
 }
