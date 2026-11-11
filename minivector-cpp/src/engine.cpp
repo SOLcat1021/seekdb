@@ -314,6 +314,35 @@ constexpr uint8_t kTxnLogCommit = 1;
 constexpr uint8_t kTxnLogApplied = 2;
 constexpr uint64_t kTxnLogMaxPayload = 512ull * 1024 * 1024;
 
+std::string transaction_batches_path(const std::string& directory) {
+    return directory + "/txn-batches.log";
+}
+
+template <typename Consume>
+void for_each_transaction_chunk(const TxnOverlay& overlay, Consume consume) {
+    constexpr size_t kChunkBytes = 1u << 20;
+    std::vector<Op> ops;
+    size_t bytes = 0;
+    auto flush = [&] {
+        consume(std::move(ops));
+        ops.clear();
+        bytes = 0;
+    };
+    overlay.for_each([&](int64_t pk, const TxnOverlay::EntryValue& value) {
+        const size_t cost = sizeof(Op) + (value ? row_mem_size(*value) : 0);
+        if (!ops.empty() && (ops.size() == kStatementChunkRows ||
+                             bytes + cost > kChunkBytes)) {
+            flush();
+        }
+        ops.push_back(Op{value ? OpKind::Update : OpKind::Delete, pk, value});
+        bytes += cost;
+        return true;
+    });
+    if (!ops.empty()) {
+        flush();
+    }
+}
+
 struct TxnLogData {
     std::map<uint64_t, std::vector<std::pair<std::string, std::vector<uint8_t>>>> commits;
     std::set<uint64_t> applied;
@@ -1422,30 +1451,15 @@ std::vector<OutputValue> project_row(
     return values;
 }
 
-size_t json_quote_size(const std::string& text) {
-    size_t size = 2;
-    for (unsigned char ch : text) {
-        if (ch == '"' || ch == '\\') {
-            size += 2;
-        } else if (ch < 0x20) {
-            size += 6;
-        } else {
-            ++size;
-        }
-    }
-    return size;
-}
-
-size_t json_value_size(const OutputValue& value) {
+size_t json_value_min_bytes(const OutputValue& value) {
     switch (value.kind) {
         case OutputValue::Kind::Int:
-            return 21;
-        case OutputValue::Kind::Str:
-            return json_quote_size(value.s);
         case OutputValue::Kind::Float:
-            return 28;
+            return 1;
+        case OutputValue::Kind::Str:
+            return 2 + value.s.size();
         case OutputValue::Kind::Vec:
-            return 2 + value.v.size() * 16;
+            return value.v.empty() ? 2 : 1 + 2 * value.v.size();
     }
     return 0;
 }
@@ -1455,17 +1469,22 @@ void append_result_row(
     std::vector<OutputValue> values,
     size_t limit) {
     if (limit > 0) {
-        size_t size = 3;  // brackets and separator
-        for (const OutputValue& value : values) {
-            size += json_value_size(value) + 1;
+        // Reject only if even the smallest possible encoding exceeds the
+        // limit. The protocol checks the exact bytes, including the envelope.
+        size_t size = 2 + !result.rows.empty();
+        if (!values.empty()) {
+            size += values.size() - 1;
         }
-        if (result.json_bytes + size > limit) {
+        for (const OutputValue& value : values) {
+            size += json_value_min_bytes(value);
+        }
+        if (size > limit - result.json_min_rows_bytes) {
             throw DbError(
                 1105,
                 "HY000",
                 "response exceeds the response byte limit");
         }
-        result.json_bytes += size;
+        result.json_min_rows_bytes += size;
     }
     result.rows.push_back(std::move(values));
 }
@@ -3115,7 +3134,7 @@ std::optional<Row> Table::get_effective_row(
     return get_row(pk);
 }
 
-void Table::commit_ops(const std::vector<Op>& ops) {
+void Table::commit_ops(const std::vector<Op>& ops, bool compact_after) {
     if (ops.empty()) {
         return;
     }
@@ -3153,14 +3172,18 @@ void Table::commit_ops(const std::vector<Op>& ops) {
         live_bytes += share;
         insert_cache(op.pk, op.row.value());
     }
-    if (should_compact()) {
+    if (compact_after && should_compact()) {
         compact();
     }
 }
 
-bool Table::begin_statement_batch() {
-    if (statement_batch_active || cache.has_value()) {
+bool Table::begin_statement_batch(bool discard_cache) {
+    if (statement_batch_active || (cache.has_value() && !discard_cache)) {
         return false;
+    }
+    if (discard_cache) {
+        cache.reset();
+        cache_bytes = 0;
     }
     statement_batch_active = true;
     statement_batch_offset = seg.len;
@@ -3215,7 +3238,7 @@ void Table::append_statement_chunk(std::vector<Op> ops) {
     }
 }
 
-void Table::finish_statement_batch() {
+void Table::finish_statement_batch(bool compact_after) {
     if (!statement_batch_active) {
         return;
     }
@@ -3225,7 +3248,7 @@ void Table::finish_statement_batch() {
     crash_point("statement_after_commit");
     statement_batch_active = false;
     statement_batch_undo.clear();
-    if (should_compact()) {
+    if (compact_after && should_compact()) {
         compact();
     }
 }
@@ -5233,10 +5256,9 @@ Response Database::commit(std::optional<Txn>& txn) {
     }
     Txn transaction = std::move(txn.value());
     txn.reset();
-    bool log_started = false;
-    bool log_written = false;
+    bool published = false;
     try {
-        std::vector<std::pair<std::string, std::vector<Op>>> pending;
+        std::vector<std::pair<Table*, const TxnOverlay*>> pending;
         for (auto& [key, overlay] : transaction.tables) {
             if (overlay.empty()) {
                 continue;
@@ -5248,83 +5270,143 @@ Response Database::commit(std::optional<Txn>& txn) {
                     "42S02",
                     "Table 'minivdb." + key + "' doesn't exist");
             }
-            std::vector<Op> ops;
-            ops.reserve(overlay.size());
-            overlay.for_each([&](int64_t pk, const TxnOverlay::EntryValue& value) {
-                Op op;
-                op.pk = pk;
-                if (value.has_value()) {
-                    op.kind = OpKind::Update;
-                    op.row = value.value();
-                } else {
-                    op.kind = OpKind::Delete;
-                }
-                ops.push_back(std::move(op));
-                return true;
-            });
-            pending.emplace_back(key, std::move(ops));
+            pending.emplace_back(&found->second, &overlay);
         }
         if (pending.empty()) {
             return Response::ok();
         }
         if (pending.size() == 1) {
-            auto found = tables.find(pending.front().first);
-            found->second.commit_ops(pending.front().second);
+            auto [table, overlay] = pending.front();
+            if (!table->begin_statement_batch(true)) {
+                fail_internal("cannot start single-table commit");
+            }
+            try {
+                for_each_transaction_chunk(*overlay, [&](std::vector<Op> ops) {
+                    table->append_statement_chunk(std::move(ops));
+                });
+                table->finish_statement_batch(false);
+            } catch (...) {
+                table->abort_statement_batch();
+                throw;
+            }
             return Response::ok();
         }
 
-        // The global log is the durability point for a cross-table commit:
-        // replay it after a crash and only then write the per-table records.
-        recover_cross_transactions();
-        uint64_t id = next_txn_id++;
-        std::vector<uint8_t> payload;
-        append_u64(payload, id);
-        append_u32(payload, static_cast<uint32_t>(pending.size()));
-        for (const auto& [key, ops] : pending) {
-            auto found = tables.find(key);
-            std::vector<uint8_t> record =
-                encode_record(found->second.schema, ops);
-            append_u32(payload, static_cast<uint32_t>(key.size()));
-            payload.insert(payload.end(), key.begin(), key.end());
-            append_u64(payload, static_cast<uint64_t>(record.size()));
-            payload.insert(payload.end(), record.begin(), record.end());
-        }
-        log_started = true;
+        // Publish the complete redo file before touching any table. The
+        // temporary file and table overlays are disposable before this point.
+        const std::string path = transaction_batches_path(dir);
+        const std::string temporary = path + ".tmp";
         crash_point("cross_txn_before_log");
-        append_txn_log_record(dir, kTxnLogCommit, payload);
-        log_written = true;
+        int fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd < 0) {
+            fail_io("create transaction batches", errno);
+        }
+        try {
+            for (const auto& [table, overlay] : pending) {
+                const std::string key = lower_ascii(table->schema.table);
+                for_each_transaction_chunk(*overlay, [&](const std::vector<Op>& ops) {
+                    const auto record = encode_record(table->schema, ops);
+                    std::vector<uint8_t> header;
+                    append_u32(header, static_cast<uint32_t>(key.size()));
+                    append_u32(header, static_cast<uint32_t>(record.size()));
+                    header.insert(header.end(), key.begin(), key.end());
+                    write_all_fd(fd, header.data(), header.size(), "write transaction batch header");
+                    write_all_fd(fd, record.data(), record.size(), "write transaction batch");
+                    crash_point("cross_txn_log_chunk");
+                });
+            }
+            if (::fsync(fd) != 0) {
+                fail_io("sync transaction batches", errno);
+            }
+        } catch (...) {
+            ::close(fd);
+            throw;
+        }
+        if (::close(fd) != 0) {
+            fail_io("close transaction batches", errno);
+        }
+        if (::rename(temporary.c_str(), path.c_str()) != 0) {
+            fail_io("publish transaction batches", errno);
+        }
+        published = true;
+        fsync_dir(dir);
         crash_point("cross_txn_after_log");
-        for (const auto& [key, ops] : pending) {
-            auto found = tables.find(key);
-            found->second.commit_ops(ops);
-            crash_point("cross_txn_after_table");
-        }
-        crash_point("cross_txn_after_tables");
-        std::vector<uint8_t> applied;
-        append_u64(applied, id);
-        append_txn_log_record(dir, kTxnLogApplied, applied);
-        crash_point("cross_txn_after_applied");
-        remove_txn_log(dir);
+        transaction.tables.clear();
+        apply_transaction_batches(false);
     } catch (...) {
-        if (log_written) {
-            // Complete the already-durable transaction before returning the
-            // error, so this process does not expose a partial commit.
-            try {
-                recover_cross_transactions();
-            } catch (...) {
-            }
-        } else {
-            if (log_started) {
-                try {
-                    remove_txn_log(dir);
-                } catch (...) {
-                }
-            }
-            txn = std::move(transaction);
+        if (published) {
+            // Recovery must finish the durable commit before serving reads.
+            std::fputs("minivector: restart required to finish durable commit\n", stderr);
+            std::_Exit(1);
         }
+        txn = std::move(transaction);
         throw;
     }
     return Response::ok();
+}
+
+void Database::apply_transaction_batches(bool recovering) {
+    const std::string path = transaction_batches_path(dir);
+    if (!std::filesystem::exists(path)) {
+        return;
+    }
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        fail_internal("cannot open transaction batches");
+    }
+    Table* previous = nullptr;
+    auto finish_table = [&] {
+        if (!previous->fsync && ::fdatasync(previous->seg.fd) != 0) {
+            fail_io("sync replayed transaction batches", errno);
+        }
+        crash_point(recovering ? "cross_txn_recovery_after_table" : "cross_txn_after_table");
+    };
+    for (;;) {
+        uint8_t header[8];
+        input.read(reinterpret_cast<char*>(header), sizeof(header));
+        if (input.eof() && input.gcount() == 0) {
+            break;
+        }
+        if (!input) {
+            fail_internal("truncated transaction batch header");
+        }
+        const uint32_t key_size = load_u32(header);
+        const uint32_t record_size = load_u32(header + 4);
+        if (key_size == 0 || key_size > 4096 ||
+            record_size < kRawRecordHeaderSize ||
+            record_size > kTxnLogMaxPayload + kRawRecordHeaderSize) {
+            fail_internal("invalid transaction batch length");
+        }
+        std::string key(key_size, '\0');
+        input.read(key.data(), key.size());
+        auto found = tables.find(key);
+        if (!input || found == tables.end()) {
+            fail_internal("transaction batch references missing table");
+        }
+        Table* table = &found->second;
+        if (previous && table != previous) {
+            finish_table();
+        }
+        previous = table;
+        std::vector<uint8_t> record(record_size);
+        input.read(reinterpret_cast<char*>(record.data()), record.size());
+        if (!input) {
+            fail_internal("truncated transaction batch record");
+        }
+        // These operations contain final row images or tombstones. Replaying
+        // an already applied batch replaces the same logical rows.
+        table->commit_ops(decode_record(table->schema, record.data(), record.size()), false);
+    }
+    if (!previous) {
+        fail_internal("empty transaction batch log");
+    }
+    finish_table();
+    if (!recovering) {
+        crash_point("cross_txn_after_tables");
+    }
+    std::filesystem::remove(path);
+    fsync_dir(dir);
+    crash_point(recovering ? "cross_txn_recovery_after_applied" : "cross_txn_after_applied");
 }
 
 void Database::recover_cross_transactions() {
@@ -5353,6 +5435,7 @@ void Database::recover_cross_transactions() {
         crash_point("cross_txn_recovery_after_applied");
     }
     remove_txn_log(dir);
+    apply_transaction_batches(true);
 }
 
 void Database::apply_ops(

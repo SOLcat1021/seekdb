@@ -102,7 +102,7 @@ struct OutputValue {
 struct QueryResult {
     std::vector<std::string> columns;
     std::vector<std::vector<OutputValue>> rows;
-    size_t json_bytes = 0;
+    size_t json_min_rows_bytes = 0;
     std::string spill_path;
     uint64_t spill_rows = 0;
 };
@@ -156,9 +156,9 @@ public:
     void save_ann_index() const;
     bool build_ann_index();
     bool ensure_ann_index();
-    bool begin_statement_batch();
+    bool begin_statement_batch(bool discard_cache = false);
     void append_statement_chunk(std::vector<Op> ops);
-    void finish_statement_batch();
+    void finish_statement_batch(bool compact_after = true);
     void abort_statement_batch();
     bool should_compact() const;
     bool cache_covers_all() const;
@@ -168,7 +168,7 @@ public:
     std::optional<Row> get_effective_row(
         const TxnOverlay* overlay,
         int64_t pk);
-    void commit_ops(const std::vector<Op>& ops);
+    void commit_ops(const std::vector<Op>& ops, bool compact_after = true);
     void compact();
 
     void for_each_row_merged(
@@ -213,6 +213,7 @@ public:
 
 private:
     void recover_cross_transactions();
+    void apply_transaction_batches(bool recovering);
     void save_catalog();
     Response create_table(const Stmt& statement, std::optional<Txn>& txn);
     Response create_index(const Stmt& statement, std::optional<Txn>& txn);
