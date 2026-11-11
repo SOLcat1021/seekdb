@@ -910,31 +910,37 @@ private:
             std::string_view inner(trimmed.data() + 1, trimmed.size() - 2);
             std::vector<double> values;
             size_t start = 0;
-            while (start <= inner.size()) {
+            while (true) {
                 size_t comma = inner.find(',', start);
-                std::string_view piece = inner.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+                std::string_view piece = inner.substr(
+                    start,
+                    comma == std::string::npos ? std::string::npos : comma - start);
                 while (!piece.empty() && std::isspace(static_cast<unsigned char>(piece.front()))) piece.remove_prefix(1);
                 while (!piece.empty() && std::isspace(static_cast<unsigned char>(piece.back()))) piece.remove_suffix(1);
-                if (!piece.empty()) {
-                    const char* begin = piece.data();
-                    const char* end = begin + piece.size();
-                    if (*begin == '+') ++begin;
-                    double value = 0.0;
-                    const auto parsed = std::from_chars(begin, end, value, std::chars_format::general);
-                    const bool doubled_sign = piece.size() > 1 && piece.front() == '+' &&
-                                              (piece[1] == '+' || piece[1] == '-');
-                    if (parsed.ec != std::errc() || parsed.ptr != end || doubled_sign) {
-                        // Preserve the existing strtod handling for uncommon
-                        // numeric syntax; the decimal fast path allocates nothing.
-                        std::string fallback(piece);
-                        char* tail = nullptr;
-                        errno = 0;
-                        value = std::strtod(fallback.c_str(), &tail);
-                        if (tail == fallback.c_str() || *tail != '\0' || errno == ERANGE)
-                            fail_syntax("invalid vector element '" + fallback + "'");
-                    }
-                    values.push_back(value);
+                if (piece.empty()) {
+                    fail_syntax("invalid vector element: empty value");
                 }
+                const char* begin = piece.data();
+                const char* end = begin + piece.size();
+                if (*begin == '+') {
+                    ++begin;
+                    if (begin == end || *begin == '+' || *begin == '-') {
+                        fail_syntax("invalid vector element '" + std::string(piece) + "'");
+                    }
+                }
+                double value = 0.0;
+                const auto parsed = std::from_chars(begin, end, value, std::chars_format::general);
+                if (parsed.ec != std::errc() || parsed.ptr != end) {
+                    // Preserve the existing strtod handling for uncommon
+                    // numeric syntax; the decimal fast path allocates nothing.
+                    std::string fallback(piece);
+                    char* tail = nullptr;
+                    errno = 0;
+                    value = std::strtod(fallback.c_str(), &tail);
+                    if (tail == fallback.c_str() || *tail != '\0' || errno == ERANGE)
+                        fail_syntax("invalid vector element '" + fallback + "'");
+                }
+                values.push_back(value);
                 if (comma == std::string::npos) {
                     break;
                 }

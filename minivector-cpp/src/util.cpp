@@ -181,10 +181,21 @@ std::vector<float> parse_vector_literal(
                     "Incorrect vector value for column '" + column + "' at row " +
                         std::to_string(row_no) + ": empty element");
             }
-            // std::from_chars does not accept a leading plus; consume it
-            // before parsing the magnitude.
+            // std::from_chars does not accept a leading plus; consume one,
+            // but reject doubled signs instead of silently reading '+-1' as
+            // '-1'.
             if (*cursor == '+') {
                 ++cursor;
+                if (cursor == limit || *cursor == '+' || *cursor == '-') {
+                    std::string piece(
+                        token_begin, static_cast<size_t>(limit - token_begin));
+                    throw DbError(
+                        1366,
+                        "22007",
+                        "Incorrect vector value for column '" + column +
+                            "' at row " + std::to_string(row_no) + ": '" +
+                            trim(piece) + "' is not a number");
+                }
             }
             double value = 0.0;
             auto parsed = std::from_chars(
