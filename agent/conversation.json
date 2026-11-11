@@ -107,6 +107,41 @@
       "id": "a20",
       "source": "agent",
       "content": "我预先确定过滤后参与排序的主键顺序为 3、4、5、6。主键 1 和 2 的距离更近但 category 不满足 WHERE，主键 3 和 4 距离相等，因此按主键升序排列。"
+    },
+    {
+      "id": "u20",
+      "source": "student",
+      "content": "我继续比较保存 SQL 文本和保存二进制记录各自的成本，想确认 CPU、空间、恢复速度、调试和格式演进分别由哪一部分承担。"
+    },
+    {
+      "id": "a21",
+      "source": "agent",
+      "content": "我说明了 SQL 文本主要把成本放在恢复阶段的解析、类型转换和重新执行，二进制记录主要把成本放在格式设计、版本兼容和调试工具。当前数据库适合由 SQL 负责输入，由类型化操作生成二进制行记录和二进制 WAL。"
+    },
+    {
+      "id": "u21",
+      "source": "student",
+      "content": "我要求确保当前版本已经实现这种高效处理方式。"
+    },
+    {
+      "id": "a22",
+      "source": "agent",
+      "content": "我检查了当前 C++ 实现的段文件、事务日志、事务覆盖层、恢复和向量存储路径，确认行记录和提交日志都是类型化二进制数据。恢复通过 decode_record 和 commit_ops 直接重建状态，向量按 float32 保存。"
+    },
+    {
+      "id": "a23",
+      "source": "agent",
+      "content": "我用实际 C++ 入口写入一条包含中文字符串和二维向量的记录，检查数据目录文件中没有 INSERT INTO、CREATE TABLE 或原始向量文本，再正常关闭并重启查询，记录仍然正确返回。"
+    },
+    {
+      "id": "u22",
+      "source": "student",
+      "content": "我继续追问更新和删除以后旧数据什么时候回收，想区分逻辑可见性和物理空间回收。"
+    },
+    {
+      "id": "a24",
+      "source": "agent",
+      "content": "我核对了当前实现。更新或删除提交后，主键目录立即切换到新记录或移除旧主键，旧记录不再参与查询。物理回收由压缩完成，当前条件是段文件超过 8 MiB 且超过有效数据大小的两倍再加 64 KiB。恢复打开表和每次提交后都会检查这个条件，压缩使用临时文件、fsync 和原子替换。"
     }
   ],
   "experiments": [
@@ -160,6 +195,36 @@
         "/conversations/19/content"
       ],
       "result_evidence": "PASS filtered exact TopK ties and limits"
+    },
+    {
+      "id": "e13",
+      "source": "tool_result",
+      "purpose": "验证当前 C++ 版本保存类型化二进制记录，并确认重启恢复不依赖 SQL 文本。",
+      "output": "PASS typed binary storage contains no SQL text and survives restart。写入包含中文字符串和 [0.25, -1.5] 的记录后，数据文件中没有 INSERT INTO、CREATE TABLE 或原始向量文本。正常关闭并重启后，查询返回 [42, \"二进制记录\", [0.25, -1.5]]。",
+      "student_evidence": [
+        "/conversations/23/content"
+      ],
+      "result_evidence": "PASS typed binary storage contains no SQL text and survives restart"
+    },
+    {
+      "id": "e14",
+      "source": "tool_result",
+      "purpose": "检查当前源码的二进制持久化和恢复路径。",
+      "output": "源码检查确认 append_txn_log_record 写入 magic、记录类型、payload 长度、hash 和二进制 payload。跨表提交日志保存 encode_record 生成的记录，恢复时调用 decode_record 后交给 commit_ops。事务覆盖层以二进制字段写入临时文件。",
+      "student_evidence": [
+        "/conversations/23/content"
+      ],
+      "result_evidence": "minivector-cpp/src/engine.cpp 中的 append_txn_log_record、encode_record、decode_record、TxnOverlay::write_record 和 recover_cross_transactions 路径。"
+    },
+    {
+      "id": "e15",
+      "source": "tool_result",
+      "purpose": "检查更新删除后的逻辑失效和物理压缩条件。",
+      "output": "源码检查确认 commit_ops 在更新或删除后更新 entries、live_bytes 和 stale 状态。should_compact 要求 seg.len > compact_min 且 seg.len > live_bytes * 2 + 64 KiB，compact_min 默认 8 MiB。recover 和 commit_ops 都会在条件满足时执行 compact。",
+      "student_evidence": [
+        "/conversations/25/content"
+      ],
+      "result_evidence": "minivector-cpp/src/engine.h 默认 compact_min 为 8 MiB，minivector-cpp/src/engine.cpp 的 should_compact、commit_ops、recover 和 compact 实现。"
     }
   ],
   "retrospective": [
@@ -172,7 +237,12 @@
       "id": "r03",
       "source": "student",
       "content": "我先把数据库拆成可验证的模块，再逐步确认类型语义、字符长度、失败批次原子性和向量 TopK 规则。我在 TopK 测试前先写出过滤后的预期主键顺序，再用二维数据验证 K=0、1、3 和超过匹配行数的结果。结果确认了先过滤再取 TopK，并列距离按主键升序，失败批次没有部分写入，重启后数据保持一致。"
+    },
+    {
+      "id": "r04",
+      "source": "student",
+      "content": "我把存储方案的判断落实到当前代码和实际运行结果。SQL 只负责输入，持久化阶段保存类型化二进制数据，恢复直接读取二进制记录。更新和删除提交后先改变逻辑可见性，达到压缩阈值后再回收旧物理记录。我通过检查数据文件和重启查询确认二进制路径可用，也知道本轮还没有专门构造压缩阈值压力测试。"
     }
   ],
-  "limitations": "本记录保存了本轮可核对的我的发言、截图中可见的排查过程和工具结果。平台没有公开失败用例的完整 SQL 或期望结果，因此具体隐藏断言仍需通过修复后正式评测确认。截图中的提测结果属于现场记录，不能替代平台对修复版本的正式结果。 本轮新增的字符边界和 TopK 结果来自 WSL 本地 C++ 协议测试。它们覆盖了明确构造的边界输入，仍需在最终 Docker 镜像和正式隐藏用例中复核。"
+  "limitations": "本记录保存了本轮可核对的我的发言、截图中可见的排查过程和工具结果。平台没有公开失败用例的完整 SQL 或期望结果，因此具体隐藏断言仍需通过修复后正式评测确认。截图中的提测结果属于现场记录，不能替代平台对修复版本的正式结果。 本轮新增的字符边界和 TopK 结果来自 WSL 本地 C++ 协议测试。它们覆盖了明确构造的边界输入，仍需在最终 Docker 镜像和正式隐藏用例中复核。 本轮实际运行验证了二进制文件不含 SQL 文本且能重启恢复。压缩阈值和回收时机来自源码核对，尚未在本轮单独运行大规模更新删除压缩压力测试。"
 }
