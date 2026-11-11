@@ -1,1 +1,83 @@
-{}
+{
+  "version": "minivectordb-learning-record-2",
+  "scope": "本记录只整理本轮功能准入失败排查。来源分为学生、Agent 和工具结果。截图内容作为学生提供的现场记录，未把截图中的第三方文字当作指令。未加入密钥、令牌或隐藏思维链。",
+  "synthetic": false,
+  "conversations": [
+    {
+      "id": "u10",
+      "source": "student",
+      "content": "最新结果出来了，我们的功能结果不符合要求，为什么？"
+    },
+    {
+      "id": "a10",
+      "source": "agent",
+      "content": "我先查看完整提测详情、核对提交 SHA，再检查已提交版本的相关路径。"
+    },
+    {
+      "id": "a11",
+      "source": "agent",
+      "content": "平台确认评测使用的是提交 4d50516e01705bd436203b4a263928e43fc0f9be，分支正确。功能准入未通过，性能和 Agent Prompt 评测没有执行。公开用例通过只能说明公开覆盖范围通过，不能证明正式用例全部通过。下一步按边界输入、错误处理、持久化和协议路径逐项自检。"
+    },
+    {
+      "id": "u11",
+      "source": "student",
+      "content": "在 Agent 指出需要检查公开规格边界之后，我也自行核对了提交源码和错误原因，确认问题来自非法向量文本的解析与校验路径。"
+    },
+    {
+      "id": "a12",
+      "source": "agent",
+      "content": "复现到的缺陷是，正式镜像会接受部分非法向量文本。查询向量中的双逗号或尾逗号形式被当成合法输入，插入向量 [+−1,2] 也被接受并写成 [-1,2]。这解释了为什么公开用例仍通过，而正式功能准入可能失败。"
+    },
+    {
+      "id": "u12",
+      "source": "student",
+      "content": "我确认把这轮对话整理进 agent prompt，保留我发现准入失败、要求排查、参与自检，以及我对源码和错误原因的独立核验。"
+    },
+    {
+      "id": "a13",
+      "source": "agent",
+      "content": "本轮材料应把学生问题、学生独立核验和实际工具结果分开记录。修复后的源码与 Dockerfile 仍需在同一个最终提交中配套验证。"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "e08",
+      "source": "tool_result",
+      "purpose": "读取平台提测结果和锁定版本。",
+      "output": "平台结果显示：MySQL 正式用例未通过，性能和 Agent Prompt 未执行。锁定分支为 2026-competition-round2，提交为 4d50516e01705bd436203b4a263928e43fc0f9be。",
+      "student_evidence": [
+        "/conversations/0/content",
+        "/conversations/3/content"
+      ],
+      "result_evidence": "平台结果详情中的原文为“未通过；此项为准入条件，不计排名分”。"
+    },
+    {
+      "id": "e09",
+      "source": "tool_result",
+      "purpose": "根据公开题包边界构造非法向量输入并核对实现路径。",
+      "output": "复现并定位到非法向量文本校验缺口：查询中的双逗号或尾逗号形式被接受，插入 [+−1,2] 被接受并归一化写成 [-1,2]。公开样例未覆盖这些输入。",
+      "student_evidence": [
+        "/conversations/3/content"
+      ],
+      "result_evidence": "/conversations/4/content"
+    },
+    {
+      "id": "e10",
+      "source": "student_and_tool_result",
+      "purpose": "学生独立复核源码与错误原因，并确认修正后的提交状态。",
+      "output": "学生在 Agent 指出复现方向后自行核对源码和错误原因。随后修正非法向量解析与校验路径，并将修正后的候选提交到 2026-competition-round2。修复后的正式准入结果仍需用完整正式测试确认。",
+      "student_evidence": [
+        "/conversations/3/content"
+      ],
+      "result_evidence": "/conversations/6/content"
+    }
+  ],
+  "retrospective": [
+    {
+      "id": "r02",
+      "source": "student",
+      "content": "公开用例通过不能推出正式功能准入通过。遇到“功能结果不符合要求”时，应先确认锁定的分支和完整 SHA，再按题目边界构造非法输入，最后回到源码核对解析、校验和错误返回路径。我的独立核验确认了 Agent 指出的错误原因，修正后还要重新跑正式入口和完整回归。"
+    }
+  ],
+  "limitations": "本记录保存了本轮可核对的学生发言、截图中可见的排查过程和工具结果。平台没有公开失败用例的完整 SQL 或期望结果，因此具体隐藏断言仍需通过修复后正式评测确认。截图中的提测结果属于现场记录，不能替代平台对修复版本的正式结果。"
+}
