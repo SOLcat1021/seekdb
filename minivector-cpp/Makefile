@@ -1,5 +1,5 @@
 CXX ?= g++
-CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wpedantic
+CXXFLAGS ?= -std=c++17 -O3 -flto -Wall -Wextra -Wpedantic
 LDFLAGS ?= -static-libstdc++ -static-libgcc
 SRCS := $(wildcard src/*.cpp)
 HEADERS := $(wildcard src/*.h)

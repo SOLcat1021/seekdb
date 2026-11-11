@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sql.h"
+#include "quantized_scan.h"
 #include "storage.h"
 #include "util.h"
 
@@ -58,11 +59,11 @@ struct Txn {
 };
 
 struct HotSet {
+    quantized_scan::Cache quantized;
     size_t dim = 0;
     size_t vector_column = 0;
     std::vector<int64_t> pks;
     std::vector<float> vectors;
-    std::vector<float> norms;
     std::vector<std::optional<std::vector<int64_t>>> int_columns;
     std::vector<std::optional<std::vector<std::string>>> str_columns;
 };

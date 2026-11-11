@@ -1,0 +1,2 @@
+minivector: data=/data tables=0 rows=0 recovery=0ms hot=682MiB fsync=on
+Q8_STATS examined=16470000 rejected=16116339

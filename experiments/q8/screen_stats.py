@@ -1,0 +1,49 @@
+from pathlib import Path
+import json, statistics, subprocess, sys, tempfile
+
+root = Path.cwd().parent
+workspace = Path(tempfile.mkdtemp(prefix="mvd-q8-unrolled-stats-", dir=root/"contest-runtime"))
+print("artifacts", workspace, flush=True)
+sys.path.insert(0, str(root/"contest-runtime"/"minivectordb-comparison-20261110"))
+import run_compare as bench
+cfg = json.loads((bench.WORKLOAD_REPO/"protocol_check/config.json").read_text())
+inserts, queries, binary = bench.workload(3000)
+truth, key = bench.oracle(binary, workspace/"oracle.json")
+original_snapshot = bench.snapshot
+def snapshot(cgroup):
+    data = original_snapshot(cgroup)
+    data["cpu.stat"] = (cgroup/"cpu.stat").read_text().strip()
+    return data
+bench.snapshot = snapshot
+images = {
+    "baseline": "mvd-exact-candidate:continuous-lto",
+    "candidate": "mvd-exact-candidate:q8-bound",
+}
+subprocess.run(["docker","build","-t","mvd-exact-candidate:q8-unrolled-stats","-"],input="FROM mvd-exact-candidate:q8-unrolled\nENV MVD_Q8_STATS=1\n",text=True,check=True,stdout=subprocess.DEVNULL)
+images={"candidate":"mvd-exact-candidate:q8-unrolled-stats"}
+meta = {name: subprocess.check_output(["docker","image","inspect","--format","{{.Id}}",image], text=True).strip() for name,image in images.items()}
+sequence = ["candidate"]
+report = {"scope":"local", "image_ids":meta, "oracle_key":key, "rows":10000,
+          "dimensions":128, "config":cfg, "runs":[]}
+
+def cpu_use(data):
+    return int(dict(line.split() for line in data["cpu.stat"].splitlines())["usage_usec"])
+
+for i,name in enumerate(sequence, 1):
+    row = bench.run(images[name], bench.Session, cfg, inserts, queries, truth, workspace/f"{i:02d}-{name}.stderr")
+    phases = row["cgroup_phases"]
+    row["write_cpu_seconds"] = (cpu_use(phases["loaded"])-cpu_use(phases["created"]))/1e6
+    row["query_cpu_seconds"] = (cpu_use(phases["queried"])-cpu_use(phases["loaded"]))/1e6
+    row["version"] = name
+    report["runs"].append(row)
+    (workspace/"comparison.json").write_text(json.dumps(report, indent=2)+"\n")
+    print(i,name,{k:round(row[k],5) for k in ("write_seconds","query_seconds","write_cpu_seconds","query_cpu_seconds")},flush=True)
+
+metrics = ("write_seconds","query_seconds","write_cpu_seconds","query_cpu_seconds","memory_peak_bytes_before_shutdown")
+report["summary"] = {}
+for name in images:
+    rows = [r for r in report["runs"] if r["version"]==name]
+    report["summary"][name] = {metric:{"median":statistics.median(r[metric] for r in rows), "min":min(r[metric] for r in rows), "max":max(r[metric] for r in rows)} for metric in metrics}
+    report["summary"][name]["queries_verified"] = sum(r["queries_verified"] for r in rows)
+(workspace/"comparison.json").write_text(json.dumps(report,indent=2)+"\n")
+print("SUMMARY",json.dumps(report["summary"]),flush=True)

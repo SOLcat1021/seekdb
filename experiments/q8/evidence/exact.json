@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "queries_verified": 4800,
+  "oracle": "Python struct float32 + math.fsum; independent of engine",
+  "cache_mb": [
+    0,
+    64
+  ],
+  "stages": [
+    "committed",
+    "overlay",
+    "updated",
+    "restarted"
+  ]
+}

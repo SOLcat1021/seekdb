@@ -1,0 +1,634 @@
+{
+  "scope": "local",
+  "image_ids": {
+    "baseline": "sha256:7512671d2ec99d72fb41727013f9ebac345a508629f8d94f4496323f8a7c48ea",
+    "candidate": "sha256:48ef24f3484ff6836d32c8c95630f4cbc93dbd97223b379c74b97d7bedc01efb"
+  },
+  "oracle_key": "ddddcb8772cd7bdccefa84b368ba01c1b45f97984116c5ffb81badadd0732ffc",
+  "rows": 10000,
+  "dimensions": 128,
+  "config": {
+    "startup_timeout": 120,
+    "request_timeout": 60,
+    "case_timeout": 600,
+    "max_response_bytes": 16777216,
+    "cpus": "2",
+    "memory": "2g",
+    "pids_limit": 128,
+    "abs_tol": 1e-05,
+    "rel_tol": 1e-05,
+    "error_codes": {}
+  },
+  "runs": [
+    {
+      "startup_create_seconds": 0.5044433529999992,
+      "write_seconds": 0.32477249800001573,
+      "query_seconds": 2.1328353600000014,
+      "first_query_ms": 3.482689999998456,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.7272233020004061,
+        "p50_ms": 0.7008070000154021,
+        "p95_ms_nearest_rank": 0.9576530000003913
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.6916575606669161,
+        "p50_ms": 0.6660195000165459,
+        "p95_ms_nearest_rank": 0.9118179999916265
+      },
+      "memory_peak_bytes_before_shutdown": 21581824,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "7667712",
+          "memory.peak": "11923456",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=6156288 wbytes=4096 rios=113 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 31793\nuser_usec 11561\nsystem_usec 20232\nnice_usec 0\nnr_periods 2\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "15032320",
+          "memory.peak": "15093760",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=6156288 wbytes=5763072 rios=113 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 105284\nuser_usec 44666\nsystem_usec 60618\nnice_usec 0\nnr_periods 5\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "21577728",
+          "memory.peak": "21581824",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=6156288 wbytes=5763072 rios=113 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 563194\nuser_usec 386425\nsystem_usec 176769\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.073491,
+      "query_cpu_seconds": 0.45791,
+      "version": "baseline"
+    },
+    {
+      "startup_create_seconds": 0.4656989700000054,
+      "write_seconds": 0.3235966619999999,
+      "query_seconds": 2.1289899809999895,
+      "first_query_ms": 7.880158000006077,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.7194347359998498,
+        "p50_ms": 0.6932884999883981,
+        "p95_ms_nearest_rank": 0.9446789999856264
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.6968547799998722,
+        "p50_ms": 0.6720414999961122,
+        "p95_ms_nearest_rank": 0.9019979999891348
+      },
+      "memory_peak_bytes_before_shutdown": 19628032,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "4792320",
+          "memory.peak": "9146368",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=2682880 wbytes=4096 rios=7 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 25590\nuser_usec 10236\nsystem_usec 15354\nnice_usec 0\nnr_periods 2\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "11767808",
+          "memory.peak": "12001280",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=2682880 wbytes=5763072 rios=7 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 92000\nuser_usec 25091\nsystem_usec 66909\nnice_usec 0\nnr_periods 6\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "19488768",
+          "memory.peak": "19628032",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=2682880 wbytes=5763072 rios=7 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 566138\nuser_usec 417372\nsystem_usec 148766\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.06641,
+      "query_cpu_seconds": 0.474138,
+      "version": "candidate"
+    },
+    {
+      "startup_create_seconds": 0.46719571500000256,
+      "write_seconds": 0.3300730629999862,
+      "query_seconds": 2.119250079000011,
+      "first_query_ms": 6.77067600000214,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.7171012526669264,
+        "p50_ms": 0.6939915000145902,
+        "p95_ms_nearest_rank": 0.9209350000105587
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.6925918460001602,
+        "p50_ms": 0.6736075000048913,
+        "p95_ms_nearest_rank": 0.8866800000078001
+      },
+      "memory_peak_bytes_before_shutdown": 17035264,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "2199552",
+          "memory.peak": "6008832",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 24812\nuser_usec 12406\nsystem_usec 12406\nnice_usec 0\nnr_periods 3\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "8912896",
+          "memory.peak": "9146368",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 96721\nuser_usec 48360\nsystem_usec 48360\nnice_usec 0\nnr_periods 7\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "17035264",
+          "memory.peak": "17035264",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 556441\nuser_usec 411452\nsystem_usec 144988\nnice_usec 0\nnr_periods 28\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.071909,
+      "query_cpu_seconds": 0.45972,
+      "version": "candidate"
+    },
+    {
+      "startup_create_seconds": 0.4458166379999966,
+      "write_seconds": 0.32050279300000284,
+      "query_seconds": 2.138726862999988,
+      "first_query_ms": 3.7042619999851922,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.7289965393337638,
+        "p50_ms": 0.7042659999996204,
+        "p95_ms_nearest_rank": 0.9454970000035701
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.6937703946669558,
+        "p50_ms": 0.6715890000066338,
+        "p95_ms_nearest_rank": 0.8969449999938206
+      },
+      "memory_peak_bytes_before_shutdown": 16060416,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "2146304",
+          "memory.peak": "6246400",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 26964\nuser_usec 17976\nsystem_usec 8988\nnice_usec 0\nnr_periods 2\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "9510912",
+          "memory.peak": "9625600",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 95152\nuser_usec 49479\nsystem_usec 45673\nnice_usec 0\nnr_periods 5\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "15994880",
+          "memory.peak": "16060416",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 562871\nuser_usec 423123\nsystem_usec 139747\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.068188,
+      "query_cpu_seconds": 0.467719,
+      "version": "baseline"
+    },
+    {
+      "startup_create_seconds": 0.4731853620000095,
+      "write_seconds": 0.3201571569999828,
+      "query_seconds": 2.1415695250000226,
+      "first_query_ms": 7.172328999985211,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.7239021746668944,
+        "p50_ms": 0.698461500007852,
+        "p95_ms_nearest_rank": 0.9277129999816225
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.7007858233332058,
+        "p50_ms": 0.684115500007465,
+        "p95_ms_nearest_rank": 0.8949209999968843
+      },
+      "memory_peak_bytes_before_shutdown": 16273408,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "1699840",
+          "memory.peak": "5971968",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 23428\nuser_usec 9371\nsystem_usec 14056\nnice_usec 0\nnr_periods 2\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "8413184",
+          "memory.peak": "8646656",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 88839\nuser_usec 54995\nsystem_usec 33843\nnice_usec 0\nnr_periods 5\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "16265216",
+          "memory.peak": "16273408",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 562482\nuser_usec 430590\nsystem_usec 131892\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.065411,
+      "query_cpu_seconds": 0.473643,
+      "version": "candidate"
+    },
+    {
+      "startup_create_seconds": 0.44841636800001083,
+      "write_seconds": 0.32881770800000254,
+      "query_seconds": 2.1403100709999876,
+      "first_query_ms": 3.5756589999778043,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.7297188633334789,
+        "p50_ms": 0.7077495000089584,
+        "p95_ms_nearest_rank": 0.9626289999857818
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.6940123713331067,
+        "p50_ms": 0.672169500006703,
+        "p95_ms_nearest_rank": 0.9118389999969168
+      },
+      "memory_peak_bytes_before_shutdown": 15544320,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "2154496",
+          "memory.peak": "6512640",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 24021\nuser_usec 16014\nsystem_usec 8007\nnice_usec 0\nnr_periods 3\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "8994816",
+          "memory.peak": "9109504",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 91548\nuser_usec 54928\nsystem_usec 36619\nnice_usec 0\nnr_periods 6\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "15544320",
+          "memory.peak": "15544320",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 557763\nuser_usec 395429\nsystem_usec 162334\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.067527,
+      "query_cpu_seconds": 0.466215,
+      "version": "baseline"
+    },
+    {
+      "startup_create_seconds": 0.45754440799998974,
+      "write_seconds": 0.3306128559999877,
+      "query_seconds": 2.1909172860000012,
+      "first_query_ms": 3.460800999988578,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.747826109333289,
+        "p50_ms": 0.7198505000189925,
+        "p95_ms_nearest_rank": 0.9852720000083082
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.7096772533330977,
+        "p50_ms": 0.6876534999946671,
+        "p95_ms_nearest_rank": 0.9357230000262007
+      },
+      "memory_peak_bytes_before_shutdown": 15360000,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "1708032",
+          "memory.peak": "6221824",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 24023\nuser_usec 16015\nsystem_usec 8007\nnice_usec 0\nnr_periods 2\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "8810496",
+          "memory.peak": "8871936",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 91925\nuser_usec 52529\nsystem_usec 39396\nnice_usec 0\nnr_periods 5\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "15360000",
+          "memory.peak": "15360000",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 572540\nuser_usec 434629\nsystem_usec 137911\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.067902,
+      "query_cpu_seconds": 0.480615,
+      "version": "baseline"
+    },
+    {
+      "startup_create_seconds": 0.44481636000000435,
+      "write_seconds": 0.3293021520000252,
+      "query_seconds": 2.1762352199999953,
+      "first_query_ms": 7.1490159999996195,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.735731426000522,
+        "p50_ms": 0.7093030000078215,
+        "p95_ms_nearest_rank": 0.9641229999886036
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.7120536606668679,
+        "p50_ms": 0.6879865000115615,
+        "p95_ms_nearest_rank": 0.9319309999966663
+      },
+      "memory_peak_bytes_before_shutdown": 16531456,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "1732608",
+          "memory.peak": "6021120",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 24834\nuser_usec 16556\nsystem_usec 8278\nnice_usec 0\nnr_periods 2\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "8671232",
+          "memory.peak": "8904704",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 96671\nuser_usec 40279\nsystem_usec 56391\nnice_usec 0\nnr_periods 6\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "16531456",
+          "memory.peak": "16531456",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 574090\nuser_usec 452428\nsystem_usec 121661\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.071837,
+      "query_cpu_seconds": 0.477419,
+      "version": "candidate"
+    },
+    {
+      "startup_create_seconds": 0.4775860009999917,
+      "write_seconds": 0.3250654230000123,
+      "query_seconds": 2.1319723219999958,
+      "first_query_ms": 3.363421000017297,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.7272121013334262,
+        "p50_ms": 0.7039019999979246,
+        "p95_ms_nearest_rank": 0.9362540000097397
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.6910394520004198,
+        "p50_ms": 0.6727329999876019,
+        "p95_ms_nearest_rank": 0.8840499999962503
+      },
+      "memory_peak_bytes_before_shutdown": 15269888,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "1617920",
+          "memory.peak": "5967872",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 23338\nuser_usec 11669\nsystem_usec 11669\nnice_usec 0\nnr_periods 3\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "8720384",
+          "memory.peak": "8781824",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 91260\nuser_usec 62056\nsystem_usec 29203\nnice_usec 0\nnr_periods 6\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "15269888",
+          "memory.peak": "15269888",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 550278\nuser_usec 431864\nsystem_usec 118414\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.067922,
+      "query_cpu_seconds": 0.459018,
+      "version": "baseline"
+    },
+    {
+      "startup_create_seconds": 0.4622824539999897,
+      "write_seconds": 0.3267739659999904,
+      "query_seconds": 2.1469919799999957,
+      "first_query_ms": 7.608402000016667,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.7282653886668792,
+        "p50_ms": 0.6938884999954098,
+        "p95_ms_nearest_rank": 0.9558210000193412
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.6999864073333887,
+        "p50_ms": 0.6796214999980066,
+        "p95_ms_nearest_rank": 0.8886329999882037
+      },
+      "memory_peak_bytes_before_shutdown": 16064512,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "1228800",
+          "memory.peak": "5701632",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 24423\nuser_usec 14653\nsystem_usec 9769\nnice_usec 0\nnr_periods 2\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "8204288",
+          "memory.peak": "8437760",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 95980\nuser_usec 59987\nsystem_usec 35992\nnice_usec 0\nnr_periods 5\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "15982592",
+          "memory.peak": "16064512",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 562704\nuser_usec 470204\nsystem_usec 92499\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.071557,
+      "query_cpu_seconds": 0.466724,
+      "version": "candidate"
+    },
+    {
+      "startup_create_seconds": 0.44712703400000464,
+      "write_seconds": 0.3194460879999781,
+      "query_seconds": 2.1444688910000025,
+      "first_query_ms": 7.053838999979689,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.727784399999886,
+        "p50_ms": 0.7040175000128102,
+        "p95_ms_nearest_rank": 0.9276079999835929
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.6987352580001319,
+        "p50_ms": 0.6763579999926606,
+        "p95_ms_nearest_rank": 0.8887420000007751
+      },
+      "memory_peak_bytes_before_shutdown": 16248832,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "1413120",
+          "memory.peak": "5967872",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 24781\nuser_usec 14868\nsystem_usec 9912\nnice_usec 0\nnr_periods 3\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "8388608",
+          "memory.peak": "8622080",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 92348\nuser_usec 56212\nsystem_usec 36136\nnice_usec 0\nnr_periods 6\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "16248832",
+          "memory.peak": "16248832",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 563524\nuser_usec 428278\nsystem_usec 135245\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.067567,
+      "query_cpu_seconds": 0.471176,
+      "version": "candidate"
+    },
+    {
+      "startup_create_seconds": 0.4610677750000036,
+      "write_seconds": 0.30807117300000186,
+      "query_seconds": 2.1514541539999925,
+      "first_query_ms": 3.8535820000049625,
+      "latency_unfiltered": {
+        "count": 1500,
+        "mean_ms": 0.7342241053334911,
+        "p50_ms": 0.7102474999953756,
+        "p95_ms_nearest_rank": 0.9499500000060834
+      },
+      "latency_filtered": {
+        "count": 1500,
+        "mean_ms": 0.6971077133330823,
+        "p50_ms": 0.6751520000136679,
+        "p95_ms_nearest_rank": 0.9208749999913834
+      },
+      "memory_peak_bytes_before_shutdown": 15306752,
+      "queries_verified": 3000,
+      "cgroup_phases": {
+        "created": {
+          "memory.current": "1916928",
+          "memory.peak": "6004736",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=4096 rios=0 wios=1 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 23699\nuser_usec 14219\nsystem_usec 9479\nnice_usec 0\nnr_periods 3\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "loaded": {
+          "memory.current": "8757248",
+          "memory.peak": "8916992",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 93628\nuser_usec 56991\nsystem_usec 36637\nnice_usec 0\nnr_periods 6\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        },
+        "queried": {
+          "memory.current": "15294464",
+          "memory.peak": "15306752",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "io.stat": "8:32 rbytes=0 wbytes=5763072 rios=0 wios=206 dbytes=0 dios=0",
+          "cpu.stat": "usage_usec 559303\nuser_usec 420391\nsystem_usec 138911\nnice_usec 0\nnr_periods 27\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0"
+        }
+      },
+      "write_cpu_seconds": 0.069929,
+      "query_cpu_seconds": 0.465675,
+      "version": "baseline"
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "write_seconds": {
+        "median": 0.324918960500014,
+        "min": 0.30807117300000186,
+        "max": 0.3306128559999877
+      },
+      "query_seconds": {
+        "median": 2.139518466999988,
+        "min": 2.1319723219999958,
+        "max": 2.1909172860000012
+      },
+      "write_cpu_seconds": {
+        "median": 0.068055,
+        "min": 0.067527,
+        "max": 0.073491
+      },
+      "query_cpu_seconds": {
+        "median": 0.465945,
+        "min": 0.45791,
+        "max": 0.480615
+      },
+      "memory_peak_bytes_before_shutdown": {
+        "median": 15452160.0,
+        "min": 15269888,
+        "max": 21581824
+      },
+      "queries_verified": 18000
+    },
+    "candidate": {
+      "write_seconds": {
+        "median": 0.3251853139999952,
+        "min": 0.3194460879999781,
+        "max": 0.3300730629999862
+      },
+      "query_seconds": {
+        "median": 2.1430192080000126,
+        "min": 2.119250079000011,
+        "max": 2.1762352199999953
+      },
+      "write_cpu_seconds": {
+        "median": 0.069562,
+        "min": 0.065411,
+        "max": 0.071909
+      },
+      "query_cpu_seconds": {
+        "median": 0.4724095,
+        "min": 0.45972,
+        "max": 0.477419
+      },
+      "memory_peak_bytes_before_shutdown": {
+        "median": 16402432.0,
+        "min": 16064512,
+        "max": 19628032
+      },
+      "queries_verified": 18000
+    }
+  }
+}

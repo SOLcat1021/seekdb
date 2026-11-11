@@ -1,0 +1,56 @@
+{
+  "response_boundary": {
+    "exact_limit": 394,
+    "default_wire_bytes": 16692054,
+    "large_rows": 156000,
+    "over_limit_rejected": true
+  },
+  "single_table_memory": {
+    "limit": "96m",
+    "tables": 1,
+    "inserted": 90000,
+    "survivors_after_sigkill": 89999
+  },
+  "cross_table_memory": {
+    "limit": "96m",
+    "tables": 2,
+    "inserted": 90000,
+    "survivors_after_sigkill": 89998
+  },
+  "single_before_commit": {
+    "fault": "statement_before_commit",
+    "recovery_fault": "recovery_mid",
+    "committed": false,
+    "legacy_log": false
+  },
+  "single_after_commit": {
+    "fault": "statement_after_commit",
+    "recovery_fault": "recovery_mid",
+    "committed": true,
+    "legacy_log": false
+  },
+  "cross_before_publish": {
+    "fault": "cross_txn_log_chunk",
+    "recovery_fault": "recovery_mid",
+    "committed": false,
+    "legacy_log": false
+  },
+  "cross_after_publish": {
+    "fault": "cross_txn_after_log",
+    "recovery_fault": "cross_txn_recovery_after_table",
+    "committed": true,
+    "legacy_log": false
+  },
+  "cross_after_first_table": {
+    "fault": "cross_txn_after_table",
+    "recovery_fault": "cross_txn_recovery_after_table",
+    "committed": true,
+    "legacy_log": false
+  },
+  "legacy_cross_log": {
+    "fault": "cross_txn_after_table",
+    "recovery_fault": "cross_txn_recovery_after_table",
+    "committed": true,
+    "legacy_log": true
+  }
+}

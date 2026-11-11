@@ -1,0 +1,7 @@
+{
+  "compiler": "g++ (GCC) 13.5.0",
+  "source": "tests/q8_bound_check.cpp",
+  "captured_tool_output": "{\"bound_checks\":2969064,\"vector_pairs\":424152,\"rejected\":1038668,\"out_of_range_query_fallbacks\":168,\"unsafe_prunes\":0,\"avx2\":true}",
+  "configuration": "Final four-accumulator kernel, GCC13 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer; exit 0; no sanitizer report",
+  "earlier_test_correction": "The initial test incorrectly asserted every query fits the data encoding range. Out-of-range queries correctly use the existing exact fallback; the corrected test counts those cases."
+}

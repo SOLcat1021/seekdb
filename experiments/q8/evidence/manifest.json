@@ -1,0 +1,46 @@
+{
+  "base_commit": "28695d19460afa9ab2b501c31719b214427222d4",
+  "formal_checkout_head": "42d79faa65b164fa8c1413109d538e4e071a2872",
+  "gcc13_base_image": "sha256:d47e63a2a4621ff4da4e0825bfe8c52c2e65e957333d7878e5c3a6eee2cd525e",
+  "source_files": {
+    "Dockerfile": "3916aab4f77b5a821d74ffa5f63ed54135950a6cdaa7e05063e23f1043083f5a",
+    "minivector-cpp/Makefile": "633860fce6df08ee3603e88fdf906bedcfc78098e3f1ed0170b41e0c63aff737",
+    "minivector-cpp/src/engine.cpp": "88c07bc2ccd99af58983383fd198c007b587b562d88a2a30a85ac8caa26cf7f2",
+    "minivector-cpp/src/engine.h": "e319008a0bbf4b0de505688d4ae20c1d616240ca9db3fcda8a12bf750ccd37a2",
+    "minivector-cpp/src/exact_scan.h": "48f5534d483e6f6cc17d6b8e5b273c6556b1ff56a53e320e9e06d6a26f142129",
+    "minivector-cpp/src/main.cpp": "68ab15e5f7a61ebb7595bd7bb98d6e1b91a133aabd4ff771ce357b67e9e04850",
+    "minivector-cpp/src/quantized_scan.h": "3e8b37895c48b5276a68b4e1eb0456705b7dec083fd8bed4da5c3bf2ecafc8c3",
+    "minivector-cpp/src/sql.cpp": "c000691595e44ef6f859a45114c75b23d524cc96f67529b263be07ff0796ed24",
+    "minivector-cpp/src/sql.h": "aace306951f4b6fc1cbeebaa05da7288db1dd49b883aea5fa358002f0bf06f5c",
+    "minivector-cpp/src/storage.cpp": "f80e0dc03f30a1529ba73dadffbfee54f2dff2821263a55cd2c849b3fa18059d",
+    "minivector-cpp/src/storage.h": "2b4a327c360bfedb01eceef4c6aba9dcdbea0702406e13b095a11af7cffdb7ee",
+    "minivector-cpp/src/text_scan.h": "adbcf1658247a47aeb8d5ad9bc8432de5942bf9fbf5ff599238af79cf8429b9c",
+    "minivector-cpp/src/util.cpp": "fdf8763daa69db8aab2f08a582e53e13b2508f928f5425ead03f4d1e0b81a97f",
+    "minivector-cpp/src/util.h": "297a8ca6d6ef48a88365552432cf1e30315debcff0ca5978eb67c8a8d57241f7",
+    "tests/q8_bound_check.cpp": "e30cf9f0b608bfb5583be3b3dbe6e774ef79cd05ce8f4191d96d25f3d5a91591"
+  },
+  "artifact_sources": {
+    "initial-10k.json": "mvd-q8-ab-kti2s1w1/comparison.json",
+    "final-10k.json": "mvd-q8-unrolled-ab-_9rqzfbl/comparison.json",
+    "final-100k-repeated.json": "mvd-q8-large-wm0ejtyv/cold-comparison.json",
+    "final-100k-diverse.json": "mvd-q8-diverse-large-xo0o12ng/comparison.json",
+    "public.json": "mvd-q8-unrolled-validation-8ce431v8/public/result.json",
+    "exact.json": "mvd-q8-unrolled-validation-8ce431v8/exact/result.json",
+    "large-correctness.json": "mvd-q8-unrolled-validation-8ce431v8/large/result.json",
+    "recovery.json": "mvd-q8-unrolled-validation-8ce431v8/recovery.json",
+    "cancellation.json": "mvd-q8-cancellation-hzwr084t/result.json",
+    "screen-stats.stderr": "mvd-q8-unrolled-stats-_va1eha0/01-candidate.stderr"
+  },
+  "minivectordb-collab-partner_harness_commit": "97c455598871b8354a556e41b440aeb0856cda83",
+  "minivectordb-exact-candidate_harness_commit": "5d77c9ad189637760b3d55ee98c68d03d6945503",
+  "harness_sha256": {
+    "contest-runtime/minivectordb-comparison-20261110/run_compare.py": "10a2a49e3eaa438fb202e2041978fb066318cfa298691ec78172c490e0341b4e",
+    "minivectordb-collab-partner/tools/env/bench_exact_v2.py": "e66faf7b1d4cf98f0e81b50fe73a80827fe2ebe2e104759ce3e4c8ef0d65d07e",
+    "minivectordb-collab-partner/tools/env/exact_oracle.cpp": "63229e41af2b645c9305e1cfd8720736e408692d54e76dc0d620f73dc9589406",
+    "minivectordb-collab-partner/protocol_check/_transport.py": "8dbca9b48141e81952749ecef9e68af66ebbdcb1cf051e04870d2b78ed81f44d",
+    "minivectordb-collab-partner/protocol_check/config.json": "22d6504994020264281a3e6770ad2855bf4ffcea8f62386ad18f7bd936fb5441",
+    "minivectordb-exact-candidate/tools/env/test_partner_exact.py": "0d82005f3802d60151b95bb2a1afbca03bc7d4c486c10049ac85643276714a00",
+    "minivectordb-exact-candidate/tools/env/test_partner_large.py": "b3109b194c4545e1d291fbc93f35a21e65f773e8c96bf617c9e675c94278d0fa",
+    "contest-runtime/minivectordb_bounded_commit_regression_20261111.py": "3869236d442e08c7f4b0a7ab4af61e55d8d2f65e64f83f144069274e0616ef6a"
+  }
+}

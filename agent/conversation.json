@@ -1,12 +1,13 @@
 {
-  "version": "minivectordb-learning-record-4",
+  "version": "minivectordb-learning-record-5",
   "synthetic": false,
   "scope": {
     "project": "OceanBase MiniVectorDB 加赛",
-    "through_date": "2026-11-11",
-    "notes": "本文件记录可核对的用户提问、Agent 判断、本地实验和早期平台反馈。用户原话限于可查对话。旧稿中的转述不作为学生原话或独立贡献证据。实验由 Agent 通过工具执行，学生是否亲自操作或解释结果仅按原话记录。JSON 内已包含结果节选，来源标签只用于溯源。 新增学生在看到复测结果后的原话，分别关联批量 INSERT、JSONL 响应上限、大事务提交和跨表崩溃恢复证据。 Python 版 checkpoint 恢复和耗时数据来自对应历史提交保留的实测输出，并标注了当时的版本。 补充学生对 Python 版 checkpoint 的事后取舍，以及学生先提出反例和预期、Agent 随后本地运行的精确 TopK 记录。",
-    "source_revision": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
-    "redaction": "仅摘取与赛题相关的内容。省略账号、认证信息、会话标识、无关聊天和内部推理。工具结果按字段节选或序列化，去掉临时目录和无关请求编号。"
+    "through_date": "2026-11-12",
+    "notes": "本文件记录可核对的用户提问、Agent 判断、本地实验和早期平台反馈。用户原话限于可查对话。旧稿中的转述不作为学生原话或独立贡献证据。实验由 Agent 通过工具执行，学生是否亲自操作或解释结果仅按原话记录。JSON 内已包含结果节选，来源标签只用于溯源。 新增学生在看到复测结果后的原话，分别关联批量 INSERT、JSONL 响应上限、大事务提交和跨表崩溃恢复证据。 Python 版 checkpoint 恢复和耗时数据来自对应历史提交保留的实测输出，并标注了当时的版本。 补充学生对 Python 版 checkpoint 的事后取舍，以及学生先提出反例和预期、Agent 随后本地运行的精确 TopK 记录。 新增 8 位编码与保守下界筛选的真实请求及本地实验结果。实验、推导和实现由 Agent 完成；没有补造学生对新结果的解释。本次提测整合源码与材料，正式平台结果尚待回执。",
+    "source_revision": "8d5fb44f51e8ad06d4f840c6db18f1e1ac04b034",
+    "redaction": "仅摘取与赛题相关的内容。省略账号、认证信息、会话标识、无关聊天和内部推理。工具结果按字段节选或序列化，去掉临时目录和无关请求编号。",
+    "material_base_revision": "42d79faa65b164fa8c1413109d538e4e071a2872"
   },
   "conversations": [
     {
@@ -127,6 +128,41 @@
         "2": "before_local_experiment_e12"
       },
       "content": "1. 我觉得这次取舍能接受，首查虽然慢了约 0.1 秒，但重启到查出第一条结果的总时间还是短了，尤其适合需要快速恢复的场景。2. TopK 用查询向量 [100000000,0]，主键 1 到 100 都放 [100000000,1]，主键 101 放 [100000000,0]，K=1，预期只返回 101，距离为 0。点积展开可能把距离都算成 0，如果按主键截前 65 个，就会漏掉 101。你跑一下，把我的原话和实际输出一起记进去。"
+    },
+    {
+      "id": "u11",
+      "source": "student",
+      "attribution": "verbatim",
+      "timing": "before_experiment_e13",
+      "content": "这些都是很微小的优化，你查阅一下资料，有没有什么办法有潜力能大幅提升，激进地省去一些工序，替换一些组件啥的"
+    },
+    {
+      "id": "a10",
+      "source": "agent",
+      "attribution": "summary",
+      "timing": "before_experiment_e13",
+      "content": "Agent 提议在原有精确路径前增加 8 位编码与安全距离下界；只有能证明候选无法进入 TopK 才排除，其余保留原始向量精确复核。该算法推导及实现建议来自 Agent，不计作学生原话或独立发现。"
+    },
+    {
+      "id": "u12",
+      "source": "student",
+      "attribution": "verbatim",
+      "timing": "before_experiment_e13",
+      "content": "好，先做你说的8位压缩加安全下界的精确查询原型，用GCC13和当前版本同条件对比，逐条核对结果，看看能不能有明显提升，先别动正式提测分支。"
+    },
+    {
+      "id": "a11",
+      "source": "agent",
+      "attribution": "summary",
+      "timing": "after_experiment_e13",
+      "content": "Agent 实现二次幂缩放的有符号 8 位编码，按整数直接差平方和及保守阈值筛选，最终仍用原有精确距离与主键排序。首次单累加器实现略慢，改成四路累加后，1 万行基本持平；10 万行后续不同查询有收益，但建编码拖慢首查并增加内存。因此建议保留实验原型，暂不默认替换正式版。该判断来自 Agent，学生尚未提供个人复盘。"
+    },
+    {
+      "id": "u13",
+      "source": "student",
+      "attribution": "verbatim",
+      "timing": "after_experiment_e13",
+      "content": "那就把这一版和我们的新的agent prompt整合起来提测一次看看"
     }
   ],
   "platform_feedback": [
@@ -308,6 +344,37 @@
       "scalar_oracle_output": "{\"method\":\"float32 coordinates; direct differences; math.fsum of squared differences; (distance_squared, id) ranking\",\"top1\":[[101,0]],\"distance_for_ids_1_to_100\":1}",
       "dot_expansion_simulation_output": "{\"unique_rough_distance_squared\":[0],\"zero_count\":101,\"candidate_limit\":65,\"candidate_first_id\":1,\"candidate_last_id\":65,\"contains_id_101\":false,\"reranked_top1\":[[1,1]]}",
       "actual_matches_oracle": true
+    },
+    {
+      "id": "e13",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "8 位编码安全筛选的精确 TopK 原型，与当前工作版本 GCC13 同条件对照",
+      "source_revision": {
+        "baseline": "28695d19460afa9ab2b501c31719b214427222d4",
+        "candidate": "8d5fb44f51e8ad06d4f840c6db18f1e1ac04b034"
+      },
+      "environment": {
+        "compiler": "GCC 13.5.0",
+        "flags": "-std=c++17 -O3 -flto; no fast-math",
+        "cpus": 2,
+        "memory": "2 GiB",
+        "image_ids": {
+          "baseline": "sha256:7512671d2ec99d72fb41727013f9ebac345a508629f8d94f4496323f8a7c48ea",
+          "candidate": "sha256:48ef24f3484ff6836d32c8c95630f4cbc93dbd97223b379c74b97d7bedc01efb"
+        }
+      },
+      "method": "两引擎同工具链、同数据与查询，每版六轮，A/B/B/A、B/A/A/B、A/B/B/A 交替；每次新容器与数据目录。1 万行/128维/3000不同查询，种子20261110；10万行/128维/128不同查询，种子20261112。均K=10，一半等值过滤。独立标量真值逐条核对主键、排序和距离，真值计算不计入耗时。额外重复查询数据使用1024个原型及区分主键的末维，重复全零查询，不能替代不同随机查询。",
+      "output": "{\"rows_10000\":{\"baseline\":{\"write_seconds\":{\"median\":0.324918960500014,\"min\":0.30807117300000186,\"max\":0.3306128559999877},\"query_seconds\":{\"median\":2.139518466999988,\"min\":2.1319723219999958,\"max\":2.1909172860000012},\"write_cpu_seconds\":{\"median\":0.068055,\"min\":0.067527,\"max\":0.073491},\"query_cpu_seconds\":{\"median\":0.465945,\"min\":0.45791,\"max\":0.480615},\"memory_peak_bytes_before_shutdown\":{\"median\":15452160.0,\"min\":15269888,\"max\":21581824},\"queries_verified\":18000},\"candidate\":{\"write_seconds\":{\"median\":0.3251853139999952,\"min\":0.3194460879999781,\"max\":0.3300730629999862},\"query_seconds\":{\"median\":2.1430192080000126,\"min\":2.119250079000011,\"max\":2.1762352199999953},\"write_cpu_seconds\":{\"median\":0.069562,\"min\":0.065411,\"max\":0.071909},\"query_cpu_seconds\":{\"median\":0.4724095,\"min\":0.45972,\"max\":0.477419},\"memory_peak_bytes_before_shutdown\":{\"median\":16402432.0,\"min\":16064512,\"max\":19628032},\"queries_verified\":18000}},\"rows_100000\":{\"baseline\":{\"write_seconds\":{\"median\":3.093271350000009,\"min\":3.07532319500001,\"max\":3.483500468000045},\"query_seconds\":{\"median\":0.23942108900001813,\"min\":0.22646270900003174,\"max\":0.2622544799999673},\"write_cpu_seconds\":{\"median\":0.6911985,\"min\":0.675668,\"max\":0.711776},\"query_cpu_seconds\":{\"median\":0.38407250000000004,\"min\":0.36549,\"max\":0.430099},\"memory_peak_bytes_before_shutdown\":{\"median\":124764160.0,\"min\":124235776,\"max\":130142208},\"queries_verified\":768},\"candidate\":{\"write_seconds\":{\"median\":3.099716330000007,\"min\":3.0823635589999867,\"max\":3.198336482000002},\"query_seconds\":{\"median\":0.23584131650000018,\"min\":0.22168556899998748,\"max\":0.24918861200001174},\"write_cpu_seconds\":{\"median\":0.6729499999999999,\"min\":0.661259,\"max\":0.708243},\"query_cpu_seconds\":{\"median\":0.27211549999999995,\"min\":0.258955,\"max\":0.28487},\"memory_peak_bytes_before_shutdown\":{\"median\":137981952.0,\"min\":136974336,\"max\":140431360},\"queries_verified\":768}}}",
+      "derived_summary": "{\"10k\":{\"baseline\":{\"first_query_ms\":3.5291744999881303,\"subsequent_queries_seconds\":2.1358785065000063,\"query_seconds\":2.139518466999988,\"memory_peak_mib\":14.736328125},\"candidate\":{\"first_query_ms\":7.160672499992415,\"subsequent_queries_seconds\":2.13590612400003,\"query_seconds\":2.1430192080000126,\"memory_peak_mib\":15.642578125},\"subsequent_reduction_percent\":-0.0012930276670486407,\"total_reduction_percent\":-0.16362284570197172},\"100k\":{\"baseline\":{\"first_query_ms\":33.254117499978975,\"subsequent_queries_seconds\":0.2043576580000206,\"query_seconds\":0.23942108900001813,\"memory_peak_mib\":118.984375},\"candidate\":{\"first_query_ms\":71.90189850001616,\"subsequent_queries_seconds\":0.1621941444999777,\"query_seconds\":0.23584131650000018,\"memory_peak_mib\":131.58984375},\"subsequent_reduction_percent\":20.632216043520447,\"total_reduction_percent\":1.4951784385283107,\"block_subsequent_reduction_percent\":[20.451824466477863,19.55566504207035,22.58467355208986]}}",
+      "diagnostic_output": "minivector: data=/data tables=0 rows=0 recovery=0ms hot=682MiB fsync=on\nQ8_STATS examined=16470000 rejected=16116339",
+      "validation_output": "{\"public\":{\"scope\":\"public-protocol-check\",\"passed\":true,\"cases\":[{\"id\":\"sql_crud\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1540},{\"id\":\"sql_comparisons\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1449},{\"id\":\"sql_ordering\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1449},{\"id\":\"sql_empty\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1452},{\"id\":\"sql_primary_key\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1496},{\"id\":\"sql_unicode\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1473},{\"id\":\"sql_bigint\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1404},{\"id\":\"sql_unsupported\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1444},{\"id\":\"storage_restart\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":2241},{\"id\":\"vector_euclidean\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1326},{\"id\":\"transaction_commit\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1478},{\"id\":\"transaction_rollback\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1377},{\"id\":\"storage_mutations\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":2185},{\"id\":\"storage_multiple_tables\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":2223},{\"id\":\"vector_ties_and_filter\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1442},{\"id\":\"vector_float32\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":1451},{\"id\":\"vector_index_maintenance\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":2304},{\"id\":\"transaction_failed_insert\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":2323},{\"id\":\"transaction_autocommit_atomic\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":2284},{\"id\":\"transaction_shutdown_rollback\",\"status\":\"PASS\",\"message\":\"\",\"duration_ms\":2262}],\"note\":\"Local diagnostic only; no performance/Agent scores or platform callbacks.\"},\"exact\":{\"passed\":true,\"queries_verified\":4800,\"oracle\":\"Python struct float32 + math.fsum; independent of engine\",\"cache_mb\":[0,64],\"stages\":[\"committed\",\"overlay\",\"updated\",\"restarted\"]},\"large\":{\"passed\":true,\"checks\":48,\"rows\":150001,\"threads\":2,\"cache_mb\":[0,64],\"recovery\":\"actual SIGKILL after acknowledged inserts\"},\"recovery\":{\"response_boundary\":{\"exact_limit\":394,\"default_wire_bytes\":16692054,\"large_rows\":156000,\"over_limit_rejected\":true},\"single_table_memory\":{\"limit\":\"96m\",\"tables\":1,\"inserted\":90000,\"survivors_after_sigkill\":89999},\"cross_table_memory\":{\"limit\":\"96m\",\"tables\":2,\"inserted\":90000,\"survivors_after_sigkill\":89998},\"single_before_commit\":{\"fault\":\"statement_before_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"single_after_commit\":{\"fault\":\"statement_after_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":true,\"legacy_log\":false},\"cross_before_publish\":{\"fault\":\"cross_txn_log_chunk\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"cross_after_publish\":{\"fault\":\"cross_txn_after_log\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"cross_after_first_table\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"legacy_cross_log\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":true}},\"cancellation\":[{\"cache_mb\":0,\"rows\":[[101,0]],\"expected\":[[101,0.0]],\"passed\":true},{\"cache_mb\":64,\"rows\":[[101,0]],\"expected\":[[101,0.0]],\"passed\":true}]}",
+      "bound_check_output": "{\"bound_checks\":2969064,\"vector_pairs\":424152,\"rejected\":1038668,\"out_of_range_query_fallbacks\":168,\"unsafe_prunes\":0,\"avx2\":true}",
+      "bound_check_configuration": "Final four-accumulator kernel, GCC13 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer; exit 0; no sanitizer report",
+      "initial_trial_output": "{\"baseline\":{\"write_seconds\":{\"median\":0.322587860499997,\"min\":0.30845522999999986,\"max\":0.32609921699999944},\"query_seconds\":{\"median\":2.133122425,\"min\":2.115969497000002,\"max\":2.139969421999993},\"write_cpu_seconds\":{\"median\":0.072371,\"min\":0.066697,\"max\":0.074987},\"query_cpu_seconds\":{\"median\":0.460375,\"min\":0.453093,\"max\":0.461457},\"memory_peak_bytes_before_shutdown\":{\"median\":15376384.0,\"min\":14811136,\"max\":17178624},\"queries_verified\":18000},\"candidate\":{\"write_seconds\":{\"median\":0.3237504654999981,\"min\":0.3170715400000006,\"max\":0.3315896609999953},\"query_seconds\":{\"median\":2.159353795000005,\"min\":2.145871419999999,\"max\":2.1718630250000075},\"write_cpu_seconds\":{\"median\":0.0752565,\"min\":0.070042,\"max\":0.080063},\"query_cpu_seconds\":{\"median\":0.500454,\"min\":0.494351,\"max\":0.504005},\"memory_peak_bytes_before_shutdown\":{\"median\":16650240.0,\"min\":16359424,\"max\":16801792},\"queries_verified\":18000}}",
+      "repeated_query_output": "{\"baseline\":{\"first_query_ms\":{\"median\":28.892916499984267,\"min\":23.794543999997586,\"max\":34.23888600002556},\"first_query_cpu_ms\":{\"median\":31.991,\"min\":25.501,\"max\":36.417},\"warm_query_ms\":{\"median\":1.7585272500042493,\"min\":1.73732650000602,\"max\":1.7749339999966196},\"memory_peak_bytes\":{\"median\":64991232.0,\"min\":64348160,\"max\":65658880}},\"candidate\":{\"first_query_ms\":{\"median\":73.3078389999946,\"min\":58.25258199996597,\"max\":77.69183700003168},\"first_query_cpu_ms\":{\"median\":73.5365,\"min\":58.975,\"max\":77.881},\"warm_query_ms\":{\"median\":1.1631917499954625,\"min\":1.1484329999973397,\"max\":1.1917045000018334},\"memory_peak_bytes\":{\"median\":78422016.0,\"min\":77762560,\"max\":78712832}}}",
+      "limitations": "这些是本地测试，不是正式成绩。端到端时间包含控制器处理；没有统一预热，必须区分包含首查与扣除首查。原始浮点向量与编码并存，内存增加。诊断原子计数运行不用于性能结论。I/O 快照在 shutdown 前采集，不能当作完整官方 B 指标。ASan/UBSan 仅用于独立编码内核，不是本轮完整数据库 sanitizer。有限下界检查不是穷举证明。最初测试误断言所有查询都在编码区间，已修正为记录合法回退，未放宽查询结果核对。未取得本次正式评测回执。"
     }
   ],
   "source_reviews": [
@@ -650,6 +717,45 @@
         }
       ],
       "note": "学生在运行前给出输入、预期和漏检机制。Agent 用原始 JSONL 响应、独立真值和固定 65 个候选的模拟核对该预测。此次验证覆盖给定的二维反例。"
+    },
+    {
+      "id": "q10",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/17/content",
+          "quote": "这些都是很微小的优化，你查阅一下资料，有没有什么办法有潜力能大幅提升，激进地省去一些工序，替换一些组件啥的"
+        },
+        {
+          "pointer": "/conversations/19/content",
+          "quote": "好，先做你说的8位压缩加安全下界的精确查询原型，用GCC13和当前版本同条件对比，逐条核对结果，看看能不能有明显提升，先别动正式提测分支。"
+        }
+      ],
+      "agent_context": [
+        {
+          "pointer": "/conversations/18/content",
+          "quote": "只有能证明候选无法进入 TopK 才排除，其余保留原始向量精确复核。"
+        }
+      ],
+      "result_evidence": [
+        {
+          "pointer": "/experiments/12/derived_summary",
+          "quote": "\"subsequent_reduction_percent\":20.632216043520447"
+        },
+        {
+          "pointer": "/experiments/12/derived_summary",
+          "quote": "\"total_reduction_percent\":-0.16362284570197172"
+        },
+        {
+          "pointer": "/experiments/12/bound_check_output",
+          "quote": "\"unsafe_prunes\":0"
+        },
+        {
+          "pointer": "/experiments/12/validation_output",
+          "quote": "\"queries_verified\":4800"
+        }
+      ],
+      "note": "学生实际贡献是要求改变优化方向，并约束工具链、同条件对照、逐条核对和先不动正式分支。算法推导、实现、测试与结果解释由 Agent 完成；没有学生本人解释新结果的证据。后续提测授权是操作决定，不据此推断学生已理解全部算法。"
     }
-  ]
+  ],
+  "material_summary": "本材料包含学生真实提问、事后判断与预先设计的反例，并逐项区分 Agent 判断和工具执行结果。既有证据涵盖 checkpoint、分块 INSERT、响应字节上限、事务提交内存和跨表崩溃恢复、精确 TopK 大数反例。本次补充学生要求探索更大幅优化并指定 GCC13 同条件逐条核对，随后由 Agent 实现 8 位编码安全筛选并测试：1 万行基本持平；10 万行扣除首查后的不同查询耗时降低约 20.6%，但首查和内存上升。学生随后要求将该原型和材料一起提测。所有新增性能数字均为本地结果，未写成正式成绩，也未虚构学生的算法推导或结果复盘。"
 }

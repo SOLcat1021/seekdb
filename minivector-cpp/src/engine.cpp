@@ -808,54 +808,6 @@ double l2_distance_raw(
     return static_cast<double>(std::sqrt(static_cast<long double>(sum) + correction));
 }
 
-float dot_scalar(const float* a, const float* b, size_t size) {
-    float sum = 0.0f;
-    for (size_t index = 0; index < size; ++index) {
-        sum += a[index] * b[index];
-    }
-    return sum;
-}
-
-#if defined(__x86_64__) || defined(__i386__)
-__attribute__((target("avx2,fma"))) float dot_avx2(
-    const float* a,
-    const float* b,
-    size_t size) {
-    __m256 acc0 = _mm256_setzero_ps();
-    __m256 acc1 = _mm256_setzero_ps();
-    __m256 acc2 = _mm256_setzero_ps();
-    __m256 acc3 = _mm256_setzero_ps();
-    size_t index = 0;
-    while (index + 32 <= size) {
-        acc0 = _mm256_fmadd_ps(
-            _mm256_loadu_ps(a + index), _mm256_loadu_ps(b + index), acc0);
-        acc1 = _mm256_fmadd_ps(
-            _mm256_loadu_ps(a + index + 8), _mm256_loadu_ps(b + index + 8), acc1);
-        acc2 = _mm256_fmadd_ps(
-            _mm256_loadu_ps(a + index + 16), _mm256_loadu_ps(b + index + 16), acc2);
-        acc3 = _mm256_fmadd_ps(
-            _mm256_loadu_ps(a + index + 24), _mm256_loadu_ps(b + index + 24), acc3);
-        index += 32;
-    }
-    while (index + 8 <= size) {
-        acc0 = _mm256_fmadd_ps(
-            _mm256_loadu_ps(a + index), _mm256_loadu_ps(b + index), acc0);
-        index += 8;
-    }
-    __m256 total = _mm256_add_ps(
-        _mm256_add_ps(acc0, acc1), _mm256_add_ps(acc2, acc3));
-    float lanes[8];
-    _mm256_storeu_ps(lanes, total);
-    float sum = lanes[0] + lanes[1] + lanes[2] + lanes[3] + lanes[4] + lanes[5] +
-                lanes[6] + lanes[7];
-    while (index < size) {
-        sum += a[index] * b[index];
-        ++index;
-    }
-    return sum;
-}
-#endif
-
 double l2_distance_ptr(const float* a, const float* b, size_t size) {
     return exact_scan::distance(a, b, size);
 }
@@ -2339,7 +2291,7 @@ bool Table::ensure_hot() {
     set.int_columns.resize(schema.columns.size());
     set.str_columns.resize(schema.columns.size());
     size_t bytes_per_row = static_cast<size_t>(set.dim) * sizeof(float) +
-                           sizeof(int64_t) + sizeof(float);
+                           sizeof(int64_t);
     for (size_t index = 0; index < schema.columns.size(); ++index) {
         if (schema.columns[index].type.kind == TypeKind::BigInt) {
             set.int_columns[index] = std::vector<int64_t>{};
@@ -2350,7 +2302,6 @@ bool Table::ensure_hot() {
         size_t count = cache->size();
         set.pks.reserve(count);
         set.vectors.reserve(count * set.dim);
-        set.norms.reserve(count);
         for (const auto& [pk, row] : cache.value()) {
             if (row.values.size() != schema.columns.size()) {
                 return false;
@@ -2369,7 +2320,10 @@ bool Table::ensure_hot() {
                 return false;
             }
             set.vectors.insert(set.vectors.end(), value.v.begin(), value.v.end());
-            set.norms.push_back(dot_scalar(value.v.data(), value.v.data(), set.dim));
+        }
+        if (set.pks.size() <= cache_budget / (bytes_per_row + set.dim)) {
+            try { set.quantized.build(set.vectors, set.dim); }
+            catch (const std::bad_alloc&) { /* optional accelerator */ }
         }
         hot = std::move(set);
         return true;
@@ -2383,7 +2337,6 @@ bool Table::ensure_hot() {
     }
     set.pks.reserve(entries.size());
     set.vectors.reserve(entries.size() * set.dim);
-    set.norms.reserve(entries.size());
     std::vector<int64_t> row_ints(schema.columns.size(), 0);
     scan_segment_raw(
         path,
@@ -2444,12 +2397,12 @@ bool Table::ensure_hot() {
                     set.vectors.data() + vector_offset,
                     raw_vector,
                     static_cast<size_t>(set.dim) * sizeof(float));
-                set.norms.push_back(dot_scalar(
-                    set.vectors.data() + vector_offset,
-                    set.vectors.data() + vector_offset,
-                    set.dim));
             }
         });
+    if (set.pks.size() <= cache_budget / (bytes_per_row + set.dim)) {
+        try { set.quantized.build(set.vectors, set.dim); }
+        catch (const std::bad_alloc&) { /* optional accelerator */ }
+    }
     hot = std::move(set);
     return true;
 }
@@ -4540,11 +4493,13 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                                  size_t end,
                                  std::vector<HotCandidate>& output) {
                 HotHeap heap(HotCompare{asc});
+                quantized_scan::Query quantized(hot.quantized, query, use_avx, asc);
                 for (size_t index = begin; index < end; ++index) {
                     if (!predicate.clauses.empty() &&
                         !hot_matches(hot, predicate, index)) {
                         continue;
                     }
+                    if (heap.size() == keep && quantized.rejects(index, heap.top().distance)) continue;
                     const float* row = hot.vectors.data() + index * hot.dim;
                     float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
                                              query.data(), hot.dim, use_avx);
@@ -4611,11 +4566,13 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         } else {
             candidates.reserve(std::min(keep, hot.pks.size()));
             const HotCompare compare{asc};
+            quantized_scan::Query quantized(hot.quantized, query, use_avx, asc);
             for (size_t index = 0; index < hot.pks.size(); ++index) {
                 if (!predicate.clauses.empty() &&
                     !hot_matches(hot, predicate, index)) {
                     continue;
                 }
+                if (candidates.size() == keep && quantized.rejects(index, candidates.front().distance)) continue;
                 const float* row = hot.vectors.data() + index * hot.dim;
                 float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
                                          query.data(), hot.dim, use_avx);

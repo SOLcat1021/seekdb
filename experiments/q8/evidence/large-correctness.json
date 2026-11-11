@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "checks": 48,
+  "rows": 150001,
+  "threads": 2,
+  "cache_mb": [
+    0,
+    64
+  ],
+  "recovery": "actual SIGKILL after acknowledged inserts"
+}

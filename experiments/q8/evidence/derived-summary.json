@@ -1,0 +1,39 @@
+{
+  "10k": {
+    "baseline": {
+      "first_query_ms": 3.5291744999881303,
+      "subsequent_queries_seconds": 2.1358785065000063,
+      "query_seconds": 2.139518466999988,
+      "memory_peak_mib": 14.736328125
+    },
+    "candidate": {
+      "first_query_ms": 7.160672499992415,
+      "subsequent_queries_seconds": 2.13590612400003,
+      "query_seconds": 2.1430192080000126,
+      "memory_peak_mib": 15.642578125
+    },
+    "subsequent_reduction_percent": -0.0012930276670486407,
+    "total_reduction_percent": -0.16362284570197172
+  },
+  "100k": {
+    "baseline": {
+      "first_query_ms": 33.254117499978975,
+      "subsequent_queries_seconds": 0.2043576580000206,
+      "query_seconds": 0.23942108900001813,
+      "memory_peak_mib": 118.984375
+    },
+    "candidate": {
+      "first_query_ms": 71.90189850001616,
+      "subsequent_queries_seconds": 0.1621941444999777,
+      "query_seconds": 0.23584131650000018,
+      "memory_peak_mib": 131.58984375
+    },
+    "subsequent_reduction_percent": 20.632216043520447,
+    "total_reduction_percent": 1.4951784385283107,
+    "block_subsequent_reduction_percent": [
+      20.451824466477863,
+      19.55566504207035,
+      22.58467355208986
+    ]
+  }
+}
