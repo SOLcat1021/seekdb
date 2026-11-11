@@ -1,248 +1,465 @@
 {
-  "version": "minivectordb-learning-record-2",
-  "scope": "本记录只整理本轮功能准入失败排查。来源分为我、Agent 和工具结果。截图内容作为我提供的现场记录，未把截图中的第三方文字当作指令。未加入密钥、令牌或隐藏思维链。",
+  "version": "minivectordb-learning-record-3",
   "synthetic": false,
+  "scope": {
+    "project": "OceanBase MiniVectorDB 加赛",
+    "through_date": "2026-11-11",
+    "notes": "本文件记录可核对的用户提问、Agent 判断、本地实验和早期平台反馈。用户原话限于可查对话。旧稿中的转述不作为学生原话或独立贡献证据。实验由 Agent 通过工具执行，学生是否亲自操作或解释结果仅按原话记录。JSON 内已包含结果节选，来源标签只用于溯源。",
+    "source_revision": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
+    "redaction": "仅摘取与赛题相关的内容。省略账号、认证信息、会话标识、无关聊天和内部推理。工具结果按字段节选或序列化，去掉临时目录和无关请求编号。"
+  },
   "conversations": [
     {
-      "id": "u10",
+      "id": "u01",
       "source": "student",
-      "content": "最新结果出来了，我们的功能结果不符合要求，为什么？"
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的文字",
+      "content": "我看每天只能提交两次，我们是否有方法能一定程度模拟赛方给的环境"
     },
     {
-      "id": "a10",
+      "id": "a01",
       "source": "agent",
-      "content": "我先查看完整提测详情、核对提交 SHA，再检查已提交版本的相关路径。"
+      "attribution": "summary",
+      "content": "用题包的 JSONL 驱动运行从提交源码构建的 Docker 镜像，固定 CPU、内存、PID 和数据目录边界。公开用例只能覆盖题包已发布的断言。"
     },
     {
-      "id": "a11",
-      "source": "agent",
-      "content": "平台确认评测使用的是提交 4d50516e01705bd436203b4a263928e43fc0f9be，分支正确。功能准入未通过，性能和 Agent Prompt 评测没有执行。公开用例通过只能说明公开覆盖范围通过，不能证明正式用例全部通过。下一步按边界输入、错误处理、持久化和协议路径逐项自检。"
-    },
-    {
-      "id": "u11",
+      "id": "u02",
       "source": "student",
-      "content": "在 Agent 指出需要检查公开规格边界之后，我也自行核对了提交源码和错误原因，确认问题来自非法向量文本的解析与校验路径。"
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的文字",
+      "content": "有什么优化方法吗，我需要你把整个数据库拆分为一个个组成部件，然后分别查阅针对他们优化方法，CSDN， github，公开论文等"
     },
     {
-      "id": "a12",
-      "source": "agent",
-      "content": "复现到的缺陷是，正式镜像会接受部分非法向量文本。查询向量中的双逗号或尾逗号形式被当成合法输入，插入向量 [+−1,2] 也被接受并写成 [-1,2]。这解释了为什么公开用例仍通过，而正式功能准入可能失败。"
-    },
-    {
-      "id": "u12",
+      "id": "u03",
       "source": "student",
-      "content": "我确认把这轮对话整理进 agent prompt，保留我发现准入失败、要求排查、参与自检，以及我对源码和错误原因的独立核验。"
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的文字",
+      "content": "好，按这个顺序做吧，先实现 checkpoint 和 WAL 截断，测一下重启过程中再次强杀能不能恢复，再对比优化前后的启动耗时。半小时内完成然后提测一次"
     },
     {
-      "id": "a13",
-      "source": "agent",
-      "content": "本轮材料应把我的问题、我的独立核验和实际工具结果分开记录。修复后的源码与 Dockerfile 仍需在同一个最终提交中配套验证。"
-    },
-    {
-      "id": "u13",
+      "id": "u04",
       "source": "student",
-      "content": "我希望把整个数据库的构建拆分成几个板块和子版块，并说明每个板块的职责、依赖关系和实现顺序。"
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的文字",
+      "content": "最新结果出来了，我们的功能结果不符合要求，为什么"
     },
     {
-      "id": "a14",
+      "id": "a04",
       "source": "agent",
-      "content": "我按进程与通信、SQL 解析、类型与语义校验、元数据、SQL 执行器、行存储、事务与恢复、向量检索、向量索引、资源控制、测试验收和构建提交拆分了实现，并建议先完成协议、类型、存储和基础增删查，再接入事务、精确 TopK、索引和性能优化。"
+      "attribution": "summary",
+      "content": "用户反馈功能准入失败后，Agent 复现了非法向量文本被接受的问题。它是独立可复现的缺陷，赛方没有公开断言，无法把该缺陷与隐藏用例对应。"
     },
     {
-      "id": "u14",
+      "id": "u05",
       "source": "student",
-      "content": "我继续确认要存储的数据类型，并要求用具体行数据说明 BIGINT、VARCHAR 和 VECTOR 的内部含义。"
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的文字",
+      "content": "这一版又没通过，比较一下我们和朋友的那个版本，到底还有啥正确性是没考虑到的"
     },
     {
-      "id": "a15",
+      "id": "a05",
       "source": "agent",
-      "content": "我确认第一阶段存储 BIGINT、VARCHAR(n) 和 VECTOR(n)。BIGINT 使用 64 位整数，VARCHAR 按 Unicode 字符数计长，VECTOR 使用固定维度的有限 float32 数组。"
+      "attribution": "summary",
+      "content": "用同一条大 INSERT 在两个镜像里核对返回行数与实际主键。Agent 在分块解析器发现起点被逐行覆盖，导致块中只解析末行，并发现长度转换缺少范围检查。朋友版本仅作为本地差分参照，结论以明确的语句语义和预期值判断。"
     },
     {
-      "id": "u15",
+      "id": "u06",
       "source": "student",
-      "content": "我继续追问存储值和计算值是否一致，要求明确 float32 或 float64 的语义基础，以及真值是否要先转换。"
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的文字",
+      "content": "再快速检查一下有没有什么漏洞，我准备几分钟后提"
     },
     {
-      "id": "a16",
+      "id": "a06",
       "source": "agent",
-      "content": "我确认向量语义以 float32 为基础。输入文本先严格解析、校验并转换为 float32，存储和距离计算都使用转换后的值，平方和可以用 float64 累加来降低误差。真值也必须先把存储向量和查询向量转换为 float32。"
+      "attribution": "summary",
+      "content": "Agent 发现响应提前估算多算了字节，同时事务覆盖层虽能溢写，COMMIT 却重新收集整批数据。建议按实际 JSONL 字节校验上限，并逐块写入或重放事务数据。"
     },
     {
-      "id": "u16",
+      "id": "u07",
       "source": "student",
-      "content": "我要求验证 VARCHAR 长度按字符还是字节计算，安排 ASCII、中文和 emoji 的边界对照，并把错误行放在批次开头、中间、末尾，失败后查全表和重启再查。"
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的文字",
+      "content": "把这些都修复了吧"
     },
     {
-      "id": "a17",
+      "id": "a07",
       "source": "agent",
-      "content": "我按这个矩阵运行了真实 C++ 可执行文件，覆盖 ASCII、中文、emoji 的字符边界，多行 INSERT 的首行、中间行和末尾行错误，以及正常关闭后的重启查询。"
+      "attribution": "summary",
+      "content": "Agent 实施修复并运行复测。单表使用原有提交标记，跨表将完整重做文件同步并发布，再按块应用。JSONL 收集阶段使用下界提前拒绝，最终由编码器检查完整物理行。"
     },
     {
-      "id": "u17",
+      "id": "u08",
       "source": "student",
-      "content": "我确认 TopK 查询需要过滤，并追问应该先取最近的 K 条再过滤，还是先过滤再取 K 条。"
-    },
+      "attribution": "verbatim",
+      "origin": "本赛题对话中用户直接发送的文字",
+      "content": "那你按题面要求把我们的 agent/conversation.json 改一版吧，区分我的原话、Agent 的判断和实际工具输出，把证据引用都核对一遍，没做过的别写成已验证。"
+    }
+  ],
+  "platform_feedback": [
     {
-      "id": "a18",
-      "source": "agent",
-      "content": "我确认语义是先应用 WHERE，再在满足条件的记录集合中计算距离并取 TopK。"
-    },
-    {
-      "id": "u18",
-      "source": "student",
-      "content": "我继续追问距离完全相等时是否可以随便选，并要求明确稳定输出规则。"
-    },
-    {
-      "id": "a19",
-      "source": "agent",
-      "content": "我确认并列距离必须稳定，按主键升序排列。精确 TopK、过滤后的 TopK 和最终结果排序都使用距离加主键的统一比较规则。"
-    },
-    {
-      "id": "u19",
-      "source": "student",
-      "content": "我要求用二维向量验证当前实现，安排两条同距离但不同主键的行，让最近的几行不满足 WHERE，并分别测试 K=0、1、3 和超过行数，同时先列出应返回的主键顺序。"
-    },
-    {
-      "id": "a20",
-      "source": "agent",
-      "content": "我预先确定过滤后参与排序的主键顺序为 3、4、5、6。主键 1 和 2 的距离更近但 category 不满足 WHERE，主键 3 和 4 距离相等，因此按主键升序排列。"
-    },
-    {
-      "id": "u20",
-      "source": "student",
-      "content": "我继续比较保存 SQL 文本和保存二进制记录各自的成本，想确认 CPU、空间、恢复速度、调试和格式演进分别由哪一部分承担。"
-    },
-    {
-      "id": "a21",
-      "source": "agent",
-      "content": "我说明了 SQL 文本主要把成本放在恢复阶段的解析、类型转换和重新执行，二进制记录主要把成本放在格式设计、版本兼容和调试工具。当前数据库适合由 SQL 负责输入，由类型化操作生成二进制行记录和二进制 WAL。"
-    },
-    {
-      "id": "u21",
-      "source": "student",
-      "content": "我要求确保当前版本已经实现这种高效处理方式。"
-    },
-    {
-      "id": "a22",
-      "source": "agent",
-      "content": "我检查了当前 C++ 实现的段文件、事务日志、事务覆盖层、恢复和向量存储路径，确认行记录和提交日志都是类型化二进制数据。恢复通过 decode_record 和 commit_ops 直接重建状态，向量按 float32 保存。"
-    },
-    {
-      "id": "a23",
-      "source": "agent",
-      "content": "我用实际 C++ 入口写入一条包含中文字符串和二维向量的记录，检查数据目录文件中没有 INSERT INTO、CREATE TABLE 或原始向量文本，再正常关闭并重启查询，记录仍然正确返回。"
-    },
-    {
-      "id": "u22",
-      "source": "student",
-      "content": "我继续追问更新和删除以后旧数据什么时候回收，想区分逻辑可见性和物理空间回收。"
-    },
-    {
-      "id": "a24",
-      "source": "agent",
-      "content": "我核对了当前实现。更新或删除提交后，主键目录立即切换到新记录或移除旧主键，旧记录不再参与查询。物理回收由压缩完成，当前条件是段文件超过 8 MiB 且超过有效数据大小的两倍再加 64 KiB。恢复打开表和每次提交后都会检查这个条件，压缩使用临时文件、fsync 和原子替换。"
+      "id": "p01",
+      "source": "platform_screenshot_supplied_by_user",
+      "status": "observed_historical",
+      "context": "用户提供的早期成绩详情截图。截图裁切处未显示提交 SHA。后续提测是否通过，本文件没有平台回执。",
+      "output": "未通过；此项为准入条件，不计排名分\nMySQL 正式用例未通过，不计本项"
     }
   ],
   "experiments": [
     {
+      "id": "e01",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "用赛方公开驱动预检最终数据库候选",
+      "source_revision": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
+      "method": "根 Dockerfile 构建的 GCC 13 镜像。JSONL 驱动以 2 CPU、2 GiB、128 PID 和只读根文件系统运行 20 组公开用例。",
+      "artifact": "minivectordb-bounded-commit-public-20261111/result.json",
+      "output": "{\"scope\":\"public-protocol-check\",\"passed\":true,\"case_count\":20,\"cases\":{\"sql_crud\":\"PASS\",\"sql_comparisons\":\"PASS\",\"sql_ordering\":\"PASS\",\"sql_empty\":\"PASS\",\"sql_primary_key\":\"PASS\",\"sql_unicode\":\"PASS\",\"sql_bigint\":\"PASS\",\"sql_unsupported\":\"PASS\",\"storage_restart\":\"PASS\",\"vector_euclidean\":\"PASS\",\"transaction_commit\":\"PASS\",\"transaction_rollback\":\"PASS\",\"storage_mutations\":\"PASS\",\"storage_multiple_tables\":\"PASS\",\"vector_ties_and_filter\":\"PASS\",\"vector_float32\":\"PASS\",\"vector_index_maintenance\":\"PASS\",\"transaction_failed_insert\":\"PASS\",\"transaction_autocommit_atomic\":\"PASS\",\"transaction_shutdown_rollback\":\"PASS\"}}"
+    },
+    {
+      "id": "e02",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "非法向量文本修复前后对照",
+      "source_revision": {
+        "baseline": "4d50516e01705bd436203b4a263928e43fc0f9be",
+        "recheck": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df"
+      },
+      "method": "本次材料审计中，使用旧正式 GCC 13 镜像和最终候选镜像重跑同四条 SQL。保留请求与响应字段，省略请求 ID。既有本地结果文件存在标签与运行入口不一致的情况，本条只用本次重跑。",
+      "artifact": "minivectordb_learning_evidence_recheck_20261111.json",
+      "output": "{\"before\":[{\"sql\":\"SELECT id,L2_DISTANCE(v,'[1,,2]') AS d FROM t ORDER BY d LIMIT 1;\",\"response\":{\"ok\":true,\"columns\":[\"id\",\"d\"],\"rows\":[[1,0]]}},{\"sql\":\"SELECT id,L2_DISTANCE(v,'[,1,2]') AS d FROM t ORDER BY d LIMIT 1;\",\"response\":{\"ok\":true,\"columns\":[\"id\",\"d\"],\"rows\":[[1,0]]}},{\"sql\":\"SELECT id,L2_DISTANCE(v,'[1,2,]') AS d FROM t ORDER BY d LIMIT 1;\",\"response\":{\"ok\":true,\"columns\":[\"id\",\"d\"],\"rows\":[[1,0]]}},{\"sql\":\"INSERT INTO t VALUES (2,'[+-1,2]');\",\"response\":{\"ok\":true,\"affected_rows\":1}},{\"sql\":\"SELECT v FROM t WHERE id=2;\",\"response\":{\"ok\":true,\"columns\":[\"v\"],\"rows\":[[[-1,2]]]}}],\"after\":[{\"sql\":\"SELECT id,L2_DISTANCE(v,'[1,,2]') AS d FROM t ORDER BY d LIMIT 1;\",\"response\":{\"ok\":false,\"error\":{\"code\":\"syntax_error\",\"message\":\"invalid vector element: empty value\"}}},{\"sql\":\"SELECT id,L2_DISTANCE(v,'[,1,2]') AS d FROM t ORDER BY d LIMIT 1;\",\"response\":{\"ok\":false,\"error\":{\"code\":\"syntax_error\",\"message\":\"invalid vector element: empty value\"}}},{\"sql\":\"SELECT id,L2_DISTANCE(v,'[1,2,]') AS d FROM t ORDER BY d LIMIT 1;\",\"response\":{\"ok\":false,\"error\":{\"code\":\"syntax_error\",\"message\":\"invalid vector element: empty value\"}}},{\"sql\":\"INSERT INTO t VALUES (2,'[+-1,2]');\",\"response\":{\"ok\":false,\"error\":{\"code\":\"invalid_value\",\"message\":\"Incorrect vector value for column 'v' at row 1: '+-1,2' is not a number\"}}},{\"sql\":\"SELECT v FROM t WHERE id=2;\",\"response\":{\"ok\":true,\"columns\":[\"v\"],\"rows\":[]}}]}"
+    },
+    {
+      "id": "e03",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "大 INSERT、长度边界与语句原子性差分",
+      "source_revision": {
+        "before": "cb1eb0dafe76f4481a222c85a275663783410852",
+        "friend": "47494ca23969067d3db796025cdc31197c1fd9ff",
+        "after": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df"
+      },
+      "method": "本地同一 JSONL 驱动。先写入一条基准行，再发约 1.15 MB、4100 行的一条 INSERT。分别核对自动提交、显式事务、重复键、非法尾部、尺寸越界和强杀回读。朋友镜像由相同提交源码本地构建。",
+      "artifact": "minivectordb_correctness_diff_20261111.json 与 minivectordb_correctness_bounded_commit_20261111.json",
+      "output": "{\"before\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":2},\"matches\":false},\"bulk_ids\":{\"expected_count\":4101,\"actual_count\":3,\"head\":[0,4096,4100],\"tail\":[0,4096,4100],\"matches\":false},\"txn_bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":2},\"matches\":false},\"txn_bulk_first_row\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[]},\"matches\":false},\"bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"bulk_duplicate_atomicity\":{\"expected\":{\"ok\":true,\"rows\":[[0]]},\"actual\":{\"ok\":true,\"rows\":[[0],[4096],[4100]]},\"matches\":false},\"bulk_extra_statement_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"bulk_trailing_comma_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"txn_bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"varchar_length_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"vector_dimension_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":true},\"matches\":false},\"committed_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[]},\"matches\":false},\"committed_txn_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[]},\"matches\":false}},\"friend\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"bulk_ids\":{\"expected_count\":4101,\"actual_count\":4101,\"head\":[0,1,2,3,4,5,6,7],\"tail\":[4093,4094,4095,4096,4097,4098,4099,4100],\"matches\":true},\"txn_bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"txn_bulk_first_row\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_duplicate_atomicity\":{\"expected\":{\"ok\":true,\"rows\":[[0]]},\"actual\":{\"ok\":true,\"rows\":[[0]]},\"matches\":true},\"bulk_extra_statement_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_trailing_comma_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"txn_bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"varchar_length_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"vector_dimension_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"committed_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"committed_txn_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true}},\"after\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"bulk_ids\":{\"expected_count\":4101,\"actual_count\":4101,\"head\":[0,1,2,3,4,5,6,7],\"tail\":[4093,4094,4095,4096,4097,4098,4099,4100],\"matches\":true},\"txn_bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true},\"txn_bulk_first_row\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_duplicate_atomicity\":{\"expected\":{\"ok\":true,\"rows\":[[0]]},\"actual\":{\"ok\":true,\"rows\":[[0]]},\"matches\":true},\"bulk_extra_statement_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"bulk_trailing_comma_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"txn_bulk_duplicate_rejected\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"varchar_length_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"vector_dimension_overflow\":{\"expected\":{\"ok\":false},\"actual\":{\"ok\":false},\"matches\":true},\"committed_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true},\"committed_txn_bulk_after_sigkill\":{\"expected\":{\"ok\":true,\"rows\":[[1]]},\"actual\":{\"ok\":true,\"rows\":[[1]]},\"matches\":true}}}"
+    },
+    {
+      "id": "e04",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "JSONL 响应大小误判与边界复测",
+      "source_revision": {
+        "before": "2db0cfbb9107fc50ec8e58968bf4ca3e70a26938",
+        "after": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df"
+      },
+      "method": "对 15.6 万行结果独立计算紧凑 JSONL 字节数，计入换行。修复后同时核对小响应恰好等于上限、少一字节上限，以及默认上限下真实超限。",
+      "artifact": "minivectordb_wire_budget_20261111.json 与 minivectordb_bounded_commit_regression_20261111.json",
+      "output": "{\"before\":{\"limit\":16777216,\"expected_wire_bytes\":16692054,\"row_count\":156000,\"actual_response\":{\"id\":\"size-edge\",\"ok\":false,\"error\":{\"code\":\"response_too_large\",\"message\":\"response exceeds the response byte limit\"}}},\"after\":{\"exact_limit\":394,\"default_wire_bytes\":16692054,\"large_rows\":156000,\"over_limit_rejected\":true}}"
+    },
+    {
+      "id": "e05",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "大事务 COMMIT 内存耗尽与修复复测",
+      "source_revision": {
+        "before": "2db0cfbb9107fc50ec8e58968bf4ca3e70a26938",
+        "friend": "47494ca23969067d3db796025cdc31197c1fd9ff",
+        "after": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df"
+      },
+      "method": "96 MiB 容器、9 万条 128 维向量。基线读取容器 OOM 标志和退出码。修复后单表与两表各用 9 万条向量，事务内分别删掉每张表主键 1 并修改主键 2 的向量，提交成功后 SIGKILL。重启核对全部主键和被修改的向量。96 MiB 是本地压力条件。",
+      "artifact": "minivectordb_txn_memory_diff_20261111.json 与 minivectordb_bounded_commit_regression_20261111.json",
+      "output": "{\"before\":{\"image\":\"mvd-exact-candidate:bulk-correctness-audit-20261111\",\"memory\":\"96m\",\"rows\":90000,\"dimensions\":128,\"error_stage\":\"commit\",\"error\":\"database exited before response\",\"container_state\":\"true 137\",\"elapsed_s\":1.398,\"restart_rows\":[]},\"friend\":{\"image\":\"mvd-friend-47494:gcc13-compare-mirror\",\"memory\":\"96m\",\"rows\":90000,\"dimensions\":128,\"commit\":{\"id\":93,\"ok\":true},\"elapsed_s\":3.63,\"restart_rows\":[[89999],[90000]]},\"single_table\":{\"limit\":\"96m\",\"tables\":1,\"inserted\":90000,\"survivors_after_sigkill\":89999},\"cross_table\":{\"limit\":\"96m\",\"tables\":2,\"inserted\":90000,\"survivors_after_sigkill\":89998}}"
+    },
+    {
+      "id": "e06",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "提交与恢复中再次终止",
+      "source_revision": {
+        "candidate": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
+        "legacy_writer": "2db0cfbb9107fc50ec8e58968bf4ca3e70a26938"
+      },
+      "method": "在提交标记前后、跨表重做发布前后、第一张表应用后，以及旧格式跨表日志场景注入进程终止。每个场景第二次启动仍注入终止，第三次启动比较两表的完整主键结果。committed 表示断言通过后的预期可见状态，false 表示未提交的数据全部回滚。",
+      "artifact": "minivectordb_bounded_commit_regression_20261111.json",
+      "output": "{\"single_before_commit\":{\"fault\":\"statement_before_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"single_after_commit\":{\"fault\":\"statement_after_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":true,\"legacy_log\":false},\"cross_before_publish\":{\"fault\":\"cross_txn_log_chunk\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"cross_after_publish\":{\"fault\":\"cross_txn_after_log\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"cross_after_first_table\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"legacy_cross_log\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":true}}"
+    },
+    {
+      "id": "e07",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "VARCHAR 字符长度、批次错误位置及正常重启",
+      "source_revision": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
+      "method": "本次整理时由 Agent 重跑旧稿提到的场景。对 ASCII、中文和 emoji 测最大字符长度与超长报错。对 ASCII 批次逐一让第 1、2、3 行超长，失败后验证表只保留基准行，正常重启后再检查每张表。",
+      "artifact": "minivectordb_learning_evidence_recheck_20261111.json",
+      "output": "{\"types\":[{\"table\":\"ascii\",\"limit\":4,\"accepted\":\"ABCD\",\"rejected\":\"ABCDE\",\"error\":\"value_too_long\"},{\"table\":\"han\",\"limit\":2,\"accepted\":\"中文\",\"rejected\":\"中文A\",\"error\":\"value_too_long\"},{\"table\":\"emoji\",\"limit\":2,\"accepted\":\"😀😃\",\"rejected\":\"😀😃A\",\"error\":\"value_too_long\"}],\"failed_batch_positions\":[1,2,3],\"after_restart\":{\"ascii\":[[1,\"ABCD\"]],\"han\":[[1,\"中文\"]],\"emoji\":[[1,\"😀😃\"]]}}"
+    },
+    {
       "id": "e08",
       "source": "tool_result",
-      "purpose": "读取平台提测结果和锁定版本。",
-      "output": "平台结果显示：MySQL 正式用例未通过，性能和 Agent Prompt 未执行。锁定分支为 2026-competition-round2，提交为 4d50516e01705bd436203b4a263928e43fc0f9be。",
-      "student_evidence": [
-        "/conversations/0/content",
-        "/conversations/3/content"
-      ],
-      "result_evidence": "平台结果详情中的原文为“未通过；此项为准入条件，不计排名分”。"
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "精确 TopK 的过滤、并列顺序与 LIMIT",
+      "source_revision": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
+      "method": "本次整理时由 Agent 重跑。二维查询向量 [0,0]。主键 1、2 更近但类别是 B，主键 4 比主键 3 更早插入，两者距离均为 1。仅查类别 A，分别断言 K 为 0、1、3、10 的结果。",
+      "artifact": "minivectordb_learning_evidence_recheck_20261111.json",
+      "output": "{\"query\":[0,0],\"filter\":\"category=A\",\"rows_by_limit\":{\"0\":[],\"1\":[[3,1]],\"3\":[[3,1],[4,1],[5,2]],\"10\":[[3,1],[4,1],[5,2],[6,3]]}}"
     },
     {
       "id": "e09",
       "source": "tool_result",
-      "purpose": "根据公开题包边界构造非法向量输入并核对实现路径。",
-      "output": "复现并定位到非法向量文本校验缺口：查询中的双逗号或尾逗号形式被接受，插入 [+−1,2] 被接受并归一化写成 [-1,2]。公开样例未覆盖这些输入。",
-      "student_evidence": [
-        "/conversations/3/content"
-      ],
-      "result_evidence": "/conversations/4/content"
-    },
-    {
-      "id": "e10",
-      "source": "student_and_tool_result",
-      "purpose": "我独立复核源码与错误原因，并确认修正后的提交状态。",
-      "output": "我在 Agent 指出复现方向后自行核对源码和错误原因。随后修正非法向量解析与校验路径，并将修正后的候选提交到 2026-competition-round2。修复后的正式准入结果仍需用完整正式测试确认。",
-      "student_evidence": [
-        "/conversations/3/content"
-      ],
-      "result_evidence": "/conversations/6/content"
-    },
-    {
-      "id": "e11",
-      "source": "tool_result",
-      "purpose": "验证 VARCHAR 字符边界、多行 INSERT 原子性和正常重启后的数据状态。",
-      "output": "PASS。ASCII VARCHAR(4) 接受 ABCD、拒绝 ABCDE。中文 VARCHAR(2) 接受“中文”（6 个 UTF-8 字节、2 个字符）、拒绝“中文A”。emoji VARCHAR(2) 接受“😀😃”（8 个 UTF-8 字节、2 个字符）、拒绝“😀😃A”。错误行位于批次开头、中间和末尾的三条多行 INSERT 都整体失败，失败后全表只保留基准行，正常关闭后重启查询结果一致。",
-      "student_evidence": [
-        "/conversations/13/content"
-      ],
-      "result_evidence": "PASS varchar character boundaries and batch atomicity"
-    },
-    {
-      "id": "e12",
-      "source": "tool_result",
-      "purpose": "验证过滤后的精确 TopK、并列距离主键排序和不同 LIMIT。",
-      "output": "使用二维向量和 query [0,0]。id=1、2 为 category B，被 WHERE 过滤。id=3、4、5、6 为 category A，距离分别为 1、1、2、3。预期主键顺序为 [3,4,5,6]。实际 K=0 返回 []，K=1 返回 [3]，K=3 返回 [3,4,5]，K=10 返回 [3,4,5,6]。协议级 C++ 测试输出 PASS filtered exact TopK ties and limits。",
-      "student_evidence": [
-        "/conversations/19/content"
-      ],
-      "result_evidence": "PASS filtered exact TopK ties and limits"
-    },
-    {
-      "id": "e13",
-      "source": "tool_result",
-      "purpose": "验证当前 C++ 版本保存类型化二进制记录，并确认重启恢复不依赖 SQL 文本。",
-      "output": "PASS typed binary storage contains no SQL text and survives restart。写入包含中文字符串和 [0.25, -1.5] 的记录后，数据文件中没有 INSERT INTO、CREATE TABLE 或原始向量文本。正常关闭并重启后，查询返回 [42, \"二进制记录\", [0.25, -1.5]]。",
-      "student_evidence": [
-        "/conversations/23/content"
-      ],
-      "result_evidence": "PASS typed binary storage contains no SQL text and survives restart"
-    },
-    {
-      "id": "e14",
-      "source": "tool_result",
-      "purpose": "检查当前源码的二进制持久化和恢复路径。",
-      "output": "源码检查确认 append_txn_log_record 写入 magic、记录类型、payload 长度、hash 和二进制 payload。跨表提交日志保存 encode_record 生成的记录，恢复时调用 decode_record 后交给 commit_ops。事务覆盖层以二进制字段写入临时文件。",
-      "student_evidence": [
-        "/conversations/23/content"
-      ],
-      "result_evidence": "minivector-cpp/src/engine.cpp 中的 append_txn_log_record、encode_record、decode_record、TxnOverlay::write_record 和 recover_cross_transactions 路径。"
-    },
-    {
-      "id": "e15",
-      "source": "tool_result",
-      "purpose": "检查更新删除后的逻辑失效和物理压缩条件。",
-      "output": "源码检查确认 commit_ops 在更新或删除后更新 entries、live_bytes 和 stale 状态。should_compact 要求 seg.len > compact_min 且 seg.len > live_bytes * 2 + 64 KiB，compact_min 默认 8 MiB。recover 和 commit_ops 都会在条件满足时执行 compact。",
-      "student_evidence": [
-        "/conversations/25/content"
-      ],
-      "result_evidence": "minivector-cpp/src/engine.h 默认 compact_min 为 8 MiB，minivector-cpp/src/engine.cpp 的 should_compact、commit_ops、recover 和 compact 实现。"
+      "status": "executed_local",
+      "executed_by": "Agent 通过本地工具",
+      "purpose": "二进制段记录及正常重启回读",
+      "source_revision": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
+      "method": "本次整理时由 Agent 重跑。写入主键 42、中文和二维向量后读取段文件，检查 magic、payload 长度、CRC32、float32 字节，以及测试 SQL 文本未出现在该段。随后正常重启并核对整行。",
+      "artifact": "minivectordb_learning_evidence_recheck_20261111.json",
+      "output": "{\"magic\":\"0x4d564442\",\"flags\":0,\"payload_bytes\":48,\"crc32_match\":true,\"contains_test_sql_text\":false,\"vector_float32_bytes\":\"0000803e0000c0bf\",\"after_restart\":[[42,\"二进制记录\",[0.25,-1.5]]]}"
     }
   ],
-  "retrospective": [
+  "source_reviews": [
     {
-      "id": "r02",
-      "source": "student",
-      "content": "公开用例通过不能推出正式功能准入通过。遇到“功能结果不符合要求”时，应先确认锁定的分支和完整 SHA，再按题目边界构造非法输入，最后回到源码核对解析、校验和错误返回路径。我的独立核验确认了 Agent 指出的错误原因，修正后还要重新跑正式入口和完整回归。"
+      "id": "s01",
+      "source": "agent",
+      "status": "source_inspection",
+      "revisions": [
+        "858168ed088b561405f5ea7d62b844a6af3c283a",
+        "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df"
+      ],
+      "content": "旧版本的跨表提交用 append_txn_log_record 写入编码后的行操作。最终候选的跨表提交用 txn-batches.log 逐块写入 encode_record 结果，发布后由 decode_record 逐块重放。单表用已有的段提交标记。两版事务覆盖层都可将类型化数据写入临时文件。此条只记录代码核对，运行证据另见实验。"
     },
     {
-      "id": "r03",
-      "source": "student",
-      "content": "我先把数据库拆成可验证的模块，再逐步确认类型语义、字符长度、失败批次原子性和向量 TopK 规则。我在 TopK 测试前先写出过滤后的预期主键顺序，再用二维数据验证 K=0、1、3 和超过匹配行数的结果。结果确认了先过滤再取 TopK，并列距离按主键升序，失败批次没有部分写入，重启后数据保持一致。"
-    },
-    {
-      "id": "r04",
-      "source": "student",
-      "content": "我把存储方案的判断落实到当前代码和实际运行结果。SQL 只负责输入，持久化阶段保存类型化二进制数据，恢复直接读取二进制记录。更新和删除提交后先改变逻辑可见性，达到压缩阈值后再回收旧物理记录。我通过检查数据文件和重启查询确认二进制路径可用，也知道本轮还没有专门构造压缩阈值压力测试。"
+      "id": "s02",
+      "source": "agent",
+      "status": "source_inspection",
+      "revision": "5ce8a96542e3ac826bfa524090f9e59b5f7dd1df",
+      "content": "更新或删除改变主键目录和 live_bytes。should_compact 的条件为段大小超过默认 8 MiB 且超过有效字节数两倍再加 64 KiB。打开表恢复时和允许立即压缩的 commit_ops 路径会检查阈值。当前显式事务单表批次和跨表重放刻意延迟压缩，不能沿用旧稿的每次提交都会检查。未运行专门的大规模更新删除压缩压力测试。"
     }
   ],
-  "limitations": "本记录保存了本轮可核对的我的发言、截图中可见的排查过程和工具结果。平台没有公开失败用例的完整 SQL 或期望结果，因此具体隐藏断言仍需通过修复后正式评测确认。截图中的提测结果属于现场记录，不能替代平台对修复版本的正式结果。 本轮新增的字符边界和 TopK 结果来自 WSL 本地 C++ 协议测试。它们覆盖了明确构造的边界输入，仍需在最终 Docker 镜像和正式隐藏用例中复核。 本轮实际运行验证了二进制文件不含 SQL 文本且能重启恢复。压缩阈值和回收时机来自源码核对，尚未在本轮单独运行大规模更新删除压缩压力测试。"
+  "historical_notes": [
+    {
+      "id": "u11",
+      "source": "previous_material_summary",
+      "status": "verbatim_unavailable",
+      "content": "旧稿提到学生独立核对非法向量缺陷。本轮没有可逐字核对的原话或学生独立操作记录，无法确定学生是否亲自执行。可证实的缺陷与复测来自 Agent 工具。"
+    },
+    {
+      "id": "u14–u16",
+      "source": "previous_material_summary",
+      "status": "verbatim_unavailable",
+      "content": "旧稿转述过类型语义、float32 真值转换、字符长度和失败行位置等问题。原话未查得，保留为背景。"
+    },
+    {
+      "id": "u17–u19",
+      "source": "previous_material_summary",
+      "status": "verbatim_unavailable",
+      "content": "旧稿转述过 TopK 过滤、并列和 LIMIT 验证方案。旧稿 a20 把预期主键顺序归给 Agent，因此不把它改写成学生自己给出的预测。"
+    },
+    {
+      "id": "u20–u22",
+      "source": "previous_material_summary",
+      "status": "verbatim_unavailable",
+      "content": "旧稿转述过 SQL 文本与二进制成本、当前二进制实现和物理回收时机。用户曾转述另一 Agent 已做源码检查和运行验证。此处不将该转述标为学生原话或亲手实验。"
+    },
+    {
+      "id": "r02–r04",
+      "source": "previous_material_summary",
+      "status": "verbatim_unavailable",
+      "content": "旧稿以第一人称总结了三段复盘。本轮未找到对应的逐字用户发言。只保留其可独立证实的内容在工具和源码记录中，未把 Agent 推断或结论计作学生自己的复盘。"
+    }
+  ],
+  "plans": [
+    {
+      "id": "plan01",
+      "source": "agent",
+      "status": "planned",
+      "content": "用户早期要求比较 checkpoint 与 WAL 截断前后的启动耗时。此文件的六组故障验证只核对恢复结果，未附一组针对这次最终候选、同条件的启动耗时对照。",
+      "student_request": {
+        "pointer": "/conversations/3/content",
+        "quote": "好，按这个顺序做吧，先实现 checkpoint 和 WAL 截断，测一下重启过程中再次强杀能不能恢复，再对比优化前后的启动耗时。半小时内完成然后提测一次"
+      }
+    },
+    {
+      "id": "plan02",
+      "source": "agent",
+      "status": "not_run_in_this_record",
+      "content": "还未对最终候选单独做大规模更新和删除触发压缩的压力验证。公开和本地回归结果不能替代未公开的功能准入、性能及 Agent Prompt 平台回执。"
+    }
+  ],
+  "evidence_index": [
+    {
+      "id": "q01",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/0/content",
+          "quote": "我看每天只能提交两次，我们是否有方法能一定程度模拟赛方给的环境"
+        }
+      ],
+      "result_evidence": [
+        {
+          "pointer": "/experiments/0/output",
+          "quote": "\"scope\":\"public-protocol-check\",\"passed\":true,\"case_count\":20"
+        }
+      ],
+      "agent_context": [
+        {
+          "pointer": "/conversations/1/content",
+          "quote": "用题包的 JSONL 驱动运行从提交源码构建的 Docker 镜像，固定 CPU、内存、PID 和数据目录边界。公开用例只能覆盖题包已发布的断言。"
+        }
+      ],
+      "note": "学生提出本地模拟需求，执行者是 Agent。"
+    },
+    {
+      "id": "q02",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/2/content",
+          "quote": "有什么优化方法吗，我需要你把整个数据库拆分为一个个组成部件，然后分别查阅针对他们优化方法，CSDN， github，公开论文等"
+        }
+      ],
+      "result_evidence": [],
+      "agent_context": [],
+      "note": "本条保留学生提出拆分组件的原话，无关联实际实验输出。"
+    },
+    {
+      "id": "q03",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/3/content",
+          "quote": "好，按这个顺序做吧，先实现 checkpoint 和 WAL 截断，测一下重启过程中再次强杀能不能恢复，再对比优化前后的启动耗时。半小时内完成然后提测一次"
+        }
+      ],
+      "result_evidence": [
+        {
+          "pointer": "/experiments/5/output",
+          "quote": "\"cross_after_first_table\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true"
+        }
+      ],
+      "agent_context": [],
+      "note": "这里关联后来版本对重复恢复的验证。启动耗时对照另列为未执行的计划。"
+    },
+    {
+      "id": "q04",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/4/content",
+          "quote": "最新结果出来了，我们的功能结果不符合要求，为什么"
+        }
+      ],
+      "result_evidence": [
+        {
+          "pointer": "/platform_feedback/0/output",
+          "quote": "MySQL 正式用例未通过，不计本项"
+        },
+        {
+          "pointer": "/experiments/1/output",
+          "quote": "{\"sql\":\"SELECT v FROM t WHERE id=2;\",\"response\":{\"ok\":true,\"columns\":[\"v\"],\"rows\":[[[-1,2]]]}}"
+        },
+        {
+          "pointer": "/experiments/1/output",
+          "quote": "{\"sql\":\"SELECT v FROM t WHERE id=2;\",\"response\":{\"ok\":true,\"columns\":[\"v\"],\"rows\":[]}}"
+        }
+      ],
+      "agent_context": [
+        {
+          "pointer": "/conversations/5/content",
+          "quote": "用户反馈功能准入失败后，Agent 复现了非法向量文本被接受的问题。它是独立可复现的缺陷，赛方没有公开断言，无法把该缺陷与隐藏用例对应。"
+        }
+      ],
+      "note": "平台截图与本地复现是两份证据，隐藏断言未确认。"
+    },
+    {
+      "id": "q05",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/6/content",
+          "quote": "这一版又没通过，比较一下我们和朋友的那个版本，到底还有啥正确性是没考虑到的"
+        }
+      ],
+      "result_evidence": [
+        {
+          "pointer": "/experiments/2/output",
+          "quote": "\"before\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":2},\"matches\":false}"
+        },
+        {
+          "pointer": "/experiments/2/output",
+          "quote": "\"after\":{\"large_insert_payload_bytes\":1146917,\"bulk_affected\":{\"expected\":{\"ok\":true,\"affected_rows\":4100},\"actual\":{\"ok\":true,\"affected_rows\":4100},\"matches\":true}"
+        }
+      ],
+      "agent_context": [
+        {
+          "pointer": "/conversations/7/content",
+          "quote": "用同一条大 INSERT 在两个镜像里核对返回行数与实际主键。Agent 在分块解析器发现起点被逐行覆盖，导致块中只解析末行，并发现长度转换缺少范围检查。朋友版本仅作为本地差分参照，结论以明确的语句语义和预期值判断。"
+        }
+      ]
+    },
+    {
+      "id": "q06",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/8/content",
+          "quote": "再快速检查一下有没有什么漏洞，我准备几分钟后提"
+        }
+      ],
+      "result_evidence": [
+        {
+          "pointer": "/experiments/3/output",
+          "quote": "\"expected_wire_bytes\":16692054,\"row_count\":156000"
+        },
+        {
+          "pointer": "/experiments/3/output",
+          "quote": "\"default_wire_bytes\":16692054,\"large_rows\":156000,\"over_limit_rejected\":true"
+        },
+        {
+          "pointer": "/experiments/4/output",
+          "quote": "\"error_stage\":\"commit\",\"error\":\"database exited before response\",\"container_state\":\"true 137\""
+        },
+        {
+          "pointer": "/experiments/4/output",
+          "quote": "\"cross_table\":{\"limit\":\"96m\",\"tables\":2,\"inserted\":90000,\"survivors_after_sigkill\":89998}"
+        }
+      ],
+      "agent_context": [
+        {
+          "pointer": "/conversations/9/content",
+          "quote": "Agent 发现响应提前估算多算了字节，同时事务覆盖层虽能溢写，COMMIT 却重新收集整批数据。建议按实际 JSONL 字节校验上限，并逐块写入或重放事务数据。"
+        },
+        {
+          "pointer": "/conversations/11/content",
+          "quote": "Agent 实施修复并运行复测。单表使用原有提交标记，跨表将完整重做文件同步并发布，再按块应用。JSONL 收集阶段使用下界提前拒绝，最终由编码器检查完整物理行。"
+        }
+      ],
+      "note": "用户要求复查并在下一条消息授权修复。实验、判断和代码修改由 Agent 执行。",
+      "followup_request": {
+        "pointer": "/conversations/10/content",
+        "quote": "把这些都修复了吧"
+      }
+    },
+    {
+      "id": "q07",
+      "student_evidence": [],
+      "result_evidence": [
+        {
+          "pointer": "/experiments/6/output",
+          "quote": "\"failed_batch_positions\":[1,2,3]"
+        },
+        {
+          "pointer": "/experiments/7/output",
+          "quote": "\"10\":[[3,1],[4,1],[5,2],[6,3]]"
+        },
+        {
+          "pointer": "/experiments/8/output",
+          "quote": "\"after_restart\":[[42,\"二进制记录\",[0.25,-1.5]]]"
+        }
+      ],
+      "agent_context": [],
+      "note": "历史提问原话未核实。本轮有真实工具结果，不声称已取得该实验的学生原话。"
+    }
+  ]
 }
