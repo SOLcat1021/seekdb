@@ -37,6 +37,76 @@
       "id": "a13",
       "source": "agent",
       "content": "本轮材料应把我的问题、我的独立核验和实际工具结果分开记录。修复后的源码与 Dockerfile 仍需在同一个最终提交中配套验证。"
+    },
+    {
+      "id": "u13",
+      "source": "student",
+      "content": "我希望把整个数据库的构建拆分成几个板块和子版块，并说明每个板块的职责、依赖关系和实现顺序。"
+    },
+    {
+      "id": "a14",
+      "source": "agent",
+      "content": "我按进程与通信、SQL 解析、类型与语义校验、元数据、SQL 执行器、行存储、事务与恢复、向量检索、向量索引、资源控制、测试验收和构建提交拆分了实现，并建议先完成协议、类型、存储和基础增删查，再接入事务、精确 TopK、索引和性能优化。"
+    },
+    {
+      "id": "u14",
+      "source": "student",
+      "content": "我继续确认要存储的数据类型，并要求用具体行数据说明 BIGINT、VARCHAR 和 VECTOR 的内部含义。"
+    },
+    {
+      "id": "a15",
+      "source": "agent",
+      "content": "我确认第一阶段存储 BIGINT、VARCHAR(n) 和 VECTOR(n)。BIGINT 使用 64 位整数，VARCHAR 按 Unicode 字符数计长，VECTOR 使用固定维度的有限 float32 数组。"
+    },
+    {
+      "id": "u15",
+      "source": "student",
+      "content": "我继续追问存储值和计算值是否一致，要求明确 float32 或 float64 的语义基础，以及真值是否要先转换。"
+    },
+    {
+      "id": "a16",
+      "source": "agent",
+      "content": "我确认向量语义以 float32 为基础。输入文本先严格解析、校验并转换为 float32，存储和距离计算都使用转换后的值，平方和可以用 float64 累加来降低误差。真值也必须先把存储向量和查询向量转换为 float32。"
+    },
+    {
+      "id": "u16",
+      "source": "student",
+      "content": "我要求验证 VARCHAR 长度按字符还是字节计算，安排 ASCII、中文和 emoji 的边界对照，并把错误行放在批次开头、中间、末尾，失败后查全表和重启再查。"
+    },
+    {
+      "id": "a17",
+      "source": "agent",
+      "content": "我按这个矩阵运行了真实 C++ 可执行文件，覆盖 ASCII、中文、emoji 的字符边界，多行 INSERT 的首行、中间行和末尾行错误，以及正常关闭后的重启查询。"
+    },
+    {
+      "id": "u17",
+      "source": "student",
+      "content": "我确认 TopK 查询需要过滤，并追问应该先取最近的 K 条再过滤，还是先过滤再取 K 条。"
+    },
+    {
+      "id": "a18",
+      "source": "agent",
+      "content": "我确认语义是先应用 WHERE，再在满足条件的记录集合中计算距离并取 TopK。"
+    },
+    {
+      "id": "u18",
+      "source": "student",
+      "content": "我继续追问距离完全相等时是否可以随便选，并要求明确稳定输出规则。"
+    },
+    {
+      "id": "a19",
+      "source": "agent",
+      "content": "我确认并列距离必须稳定，按主键升序排列。精确 TopK、过滤后的 TopK 和最终结果排序都使用距离加主键的统一比较规则。"
+    },
+    {
+      "id": "u19",
+      "source": "student",
+      "content": "我要求用二维向量验证当前实现，安排两条同距离但不同主键的行，让最近的几行不满足 WHERE，并分别测试 K=0、1、3 和超过行数，同时先列出应返回的主键顺序。"
+    },
+    {
+      "id": "a20",
+      "source": "agent",
+      "content": "我预先确定过滤后参与排序的主键顺序为 3、4、5、6。主键 1 和 2 的距离更近但 category 不满足 WHERE，主键 3 和 4 距离相等，因此按主键升序排列。"
     }
   ],
   "experiments": [
@@ -70,6 +140,26 @@
         "/conversations/3/content"
       ],
       "result_evidence": "/conversations/6/content"
+    },
+    {
+      "id": "e11",
+      "source": "tool_result",
+      "purpose": "验证 VARCHAR 字符边界、多行 INSERT 原子性和正常重启后的数据状态。",
+      "output": "PASS。ASCII VARCHAR(4) 接受 ABCD、拒绝 ABCDE。中文 VARCHAR(2) 接受“中文”（6 个 UTF-8 字节、2 个字符）、拒绝“中文A”。emoji VARCHAR(2) 接受“😀😃”（8 个 UTF-8 字节、2 个字符）、拒绝“😀😃A”。错误行位于批次开头、中间和末尾的三条多行 INSERT 都整体失败，失败后全表只保留基准行，正常关闭后重启查询结果一致。",
+      "student_evidence": [
+        "/conversations/13/content"
+      ],
+      "result_evidence": "PASS varchar character boundaries and batch atomicity"
+    },
+    {
+      "id": "e12",
+      "source": "tool_result",
+      "purpose": "验证过滤后的精确 TopK、并列距离主键排序和不同 LIMIT。",
+      "output": "使用二维向量和 query [0,0]。id=1、2 为 category B，被 WHERE 过滤。id=3、4、5、6 为 category A，距离分别为 1、1、2、3。预期主键顺序为 [3,4,5,6]。实际 K=0 返回 []，K=1 返回 [3]，K=3 返回 [3,4,5]，K=10 返回 [3,4,5,6]。协议级 C++ 测试输出 PASS filtered exact TopK ties and limits。",
+      "student_evidence": [
+        "/conversations/19/content"
+      ],
+      "result_evidence": "PASS filtered exact TopK ties and limits"
     }
   ],
   "retrospective": [
@@ -77,7 +167,12 @@
       "id": "r02",
       "source": "student",
       "content": "公开用例通过不能推出正式功能准入通过。遇到“功能结果不符合要求”时，应先确认锁定的分支和完整 SHA，再按题目边界构造非法输入，最后回到源码核对解析、校验和错误返回路径。我的独立核验确认了 Agent 指出的错误原因，修正后还要重新跑正式入口和完整回归。"
+    },
+    {
+      "id": "r03",
+      "source": "student",
+      "content": "我先把数据库拆成可验证的模块，再逐步确认类型语义、字符长度、失败批次原子性和向量 TopK 规则。我在 TopK 测试前先写出过滤后的预期主键顺序，再用二维数据验证 K=0、1、3 和超过匹配行数的结果。结果确认了先过滤再取 TopK，并列距离按主键升序，失败批次没有部分写入，重启后数据保持一致。"
     }
   ],
-  "limitations": "本记录保存了本轮可核对的我的发言、截图中可见的排查过程和工具结果。平台没有公开失败用例的完整 SQL 或期望结果，因此具体隐藏断言仍需通过修复后正式评测确认。截图中的提测结果属于现场记录，不能替代平台对修复版本的正式结果。"
+  "limitations": "本记录保存了本轮可核对的我的发言、截图中可见的排查过程和工具结果。平台没有公开失败用例的完整 SQL 或期望结果，因此具体隐藏断言仍需通过修复后正式评测确认。截图中的提测结果属于现场记录，不能替代平台对修复版本的正式结果。 本轮新增的字符边界和 TopK 结果来自 WSL 本地 C++ 协议测试。它们覆盖了明确构造的边界输入，仍需在最终 Docker 镜像和正式隐藏用例中复核。"
 }
