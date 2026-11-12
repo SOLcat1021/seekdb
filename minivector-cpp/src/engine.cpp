@@ -1029,6 +1029,55 @@ bool hot_matches(const HotSet& hot, const Predicate& predicate, size_t row) {
     return true;
 }
 
+struct HotRowSelection {
+    const uint32_t* rows;
+    size_t count;
+};
+
+std::optional<HotRowSelection> select_hot_string_rows(
+    HotSet& hot, const Predicate& predicate, size_t cache_budget) {
+    if (predicate.clauses.size() != 1) return std::nullopt;
+    const Predicate::Clause& clause = predicate.clauses.front();
+    if (clause.op != CmpOp::Eq || clause.value.kind != Value::Kind::Str ||
+        !hot.str_columns[clause.column]) return std::nullopt;
+
+    const auto& values = *hot.str_columns[clause.column];
+    if (values.empty()) return HotRowSelection{nullptr, 0};
+    auto& cache = hot.string_rows;
+    if (!cache.rows) {
+        const size_t budget = std::min<size_t>(cache_budget / 64, 1024u * 1024u);
+        if (budget <= sizeof(cache) ||
+            values.size() > (budget - sizeof(cache)) / sizeof(uint32_t)) {
+            return std::nullopt;
+        }
+        try {
+            cache.rows.reset(new uint32_t[values.size()]);
+        } catch (const std::bad_alloc&) {
+            return std::nullopt;
+        }
+        cache.column = clause.column;
+    }
+    if (cache.column != clause.column) return std::nullopt;
+
+    for (size_t i = 0; i < cache.range_count; ++i) {
+        const auto& range = cache.ranges[i];
+        if (values[cache.rows[range.begin]] == clause.value.s) {
+            return HotRowSelection{cache.rows.get() + range.begin, range.count};
+        }
+    }
+    if (cache.range_count == cache.ranges.size()) return std::nullopt;
+
+    // Distinct equality values select disjoint rows. The packed allocation
+    // therefore holds every cached list without exceeding the budget.
+    const uint32_t begin = cache.used;
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (values[i] == clause.value.s) cache.rows[cache.used++] = uint32_t(i);
+    }
+    const uint32_t count = cache.used - begin;
+    if (count != 0) cache.ranges[cache.range_count++] = {begin, count};
+    return HotRowSelection{cache.rows.get() + begin, count};
+}
+
 struct Projection {
     enum class Kind { Column, Distance };
     Kind kind = Kind::Column;
@@ -4459,7 +4508,10 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         table.hot->dim == distance_target->query->size()) {
         // Exact bounded TopK. A direct-distance f32 screen rejects only rows
         // outside a conservative rounding bound; the heap uses f64 scores.
-        const HotSet& hot = table.hot.value();
+        HotSet& hot = table.hot.value();
+        const auto selected = select_hot_string_rows(hot, predicate, table.cache_budget);
+        const size_t scan_count = selected ? selected->count : hot.pks.size();
+        const bool check_predicate = !selected && !predicate.clauses.empty();
         size_t keep = limit;
         struct HotCandidate {
             double distance;
@@ -4494,9 +4546,9 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                                  std::vector<HotCandidate>& output) {
                 HotHeap heap(HotCompare{asc});
                 quantized_scan::Query quantized(hot.quantized, query, use_avx, asc);
-                for (size_t index = begin; index < end; ++index) {
-                    if (!predicate.clauses.empty() &&
-                        !hot_matches(hot, predicate, index)) {
+                for (size_t offset = begin; offset < end; ++offset) {
+                    const size_t index = selected ? selected->rows[offset] : offset;
+                    if (check_predicate && !hot_matches(hot, predicate, index)) {
                         continue;
                     }
                     if (heap.size() == keep && quantized.rejects(index, heap.top().distance)) continue;
@@ -4527,14 +4579,14 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                                         ? 1
                                         : std::min<size_t>(4, available);
             }
-            size_t workers = std::min(requested_threads, hot.pks.size());
+            size_t workers = std::min(requested_threads, scan_count);
             if (workers <= 1) {
-                scan_part(0, hot.pks.size(), candidates);
+                scan_part(0, scan_count, candidates);
             } else {
                 std::vector<std::vector<HotCandidate>> parts(workers);
                 std::vector<std::thread> pool;
                 bool creation_failed = false;
-                size_t total = hot.pks.size();
+                size_t total = scan_count;
                 size_t per_worker = (total + workers - 1) / workers;
                 try {
                     for (size_t worker = 0; worker < workers; ++worker) {
@@ -4555,7 +4607,7 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                 }
                 if (creation_failed) {
                     candidates.clear();
-                    scan_part(0, hot.pks.size(), candidates);
+                    scan_part(0, scan_count, candidates);
                 } else {
                     for (const auto& part : parts) {
                         candidates.insert(
@@ -4564,12 +4616,12 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                 }
             }
         } else {
-            candidates.reserve(std::min(keep, hot.pks.size()));
+            candidates.reserve(std::min(keep, scan_count));
             const HotCompare compare{asc};
             quantized_scan::Query quantized(hot.quantized, query, use_avx, asc);
-            for (size_t index = 0; index < hot.pks.size(); ++index) {
-                if (!predicate.clauses.empty() &&
-                    !hot_matches(hot, predicate, index)) {
+            for (size_t offset = 0; offset < scan_count; ++offset) {
+                const size_t index = selected ? selected->rows[offset] : offset;
+                if (check_predicate && !hot_matches(hot, predicate, index)) {
                     continue;
                 }
                 if (candidates.size() == keep && quantized.rejects(index, candidates.front().distance)) continue;

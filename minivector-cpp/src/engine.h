@@ -5,9 +5,11 @@
 #include "storage.h"
 #include "util.h"
 
+#include <array>
 #include <functional>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,8 +60,22 @@ struct Txn {
     std::map<std::string, TxnOverlay> tables;
 };
 
+struct HotStringRowCache {
+    struct Range {
+        uint32_t begin;
+        uint32_t count;
+    };
+
+    std::unique_ptr<uint32_t[]> rows;
+    size_t column = 0;
+    uint32_t used = 0;
+    size_t range_count = 0;
+    std::array<Range, 16> ranges{};
+};
+
 struct HotSet {
     quantized_scan::Cache quantized;
+    HotStringRowCache string_rows;
     size_t dim = 0;
     size_t vector_column = 0;
     std::vector<int64_t> pks;

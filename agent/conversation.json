@@ -1,11 +1,11 @@
 {
-  "version": "minivectordb-learning-record-6",
+  "version": "minivectordb-learning-record-7",
   "synthetic": false,
   "scope": {
     "project": "OceanBase MiniVectorDB 加赛",
     "through_date": "2026-11-12",
-    "notes": "本文件记录可核对的用户提问、Agent 判断、本地实验和早期平台反馈。用户原话限于可查对话。旧稿中的转述不作为学生原话或独立贡献证据。实验由 Agent 通过工具执行，学生是否亲自操作或解释结果仅按原话记录。JSON 内已包含结果节选，来源标签只用于溯源。 新增学生在看到复测结果后的原话，分别关联批量 INSERT、JSONL 响应上限、大事务提交和跨表崩溃恢复证据。 Python 版 checkpoint 恢复和耗时数据来自对应历史提交保留的实测输出，并标注了当时的版本。 补充学生对 Python 版 checkpoint 的事后取舍，以及学生先提出反例和预期、Agent 随后本地运行的精确 TopK 记录。 新增 8 位编码与保守下界筛选的真实请求及本地实验结果。实验、推导和实现由 Agent 完成；没有补造学生对新结果的解释。本次提测整合源码与材料，正式平台结果尚待回执。 新增 AVX2 缓存构建的本地复测和 Agent 对学生发出的取舍问题。已收到学生对首查、内存和连续查询取舍的原话。Agent 按学生提出的验收依据复测写入，记录两轮结果。",
-    "source_revision": "14d68774b5a75f02d7599406863cf3de95dd1d3c",
+    "notes": "本文件记录可核对的用户提问、Agent 判断、本地实验和早期平台反馈。用户原话限于可查对话。旧稿中的转述不作为学生原话或独立贡献证据。实验由 Agent 通过工具执行，学生是否亲自操作或解释结果仅按原话记录。JSON 内已包含结果节选，来源标签只用于溯源。 新增学生在看到复测结果后的原话，分别关联批量 INSERT、JSONL 响应上限、大事务提交和跨表崩溃恢复证据。 Python 版 checkpoint 恢复和耗时数据来自对应历史提交保留的实测输出，并标注了当时的版本。 补充学生对 Python 版 checkpoint 的事后取舍，以及学生先提出反例和预期、Agent 随后本地运行的精确 TopK 记录。 新增 8 位编码与保守下界筛选的真实请求及本地实验结果。实验、推导和实现由 Agent 完成；没有补造学生对新结果的解释。本次提测整合源码与材料，正式平台结果尚待回执。 新增 AVX2 缓存构建的本地复测和 Agent 对学生发出的取舍问题。已收到学生对首查、内存和连续查询取舍的原话。Agent 按学生提出的验收依据复测写入，记录两轮结果。 新增单列 VARCHAR 等值过滤行号缓存的本地对照、学生原话，以及按学生建议执行的高基数复测。",
+    "source_revision": "fe827741cf5e9c4f7251686246657bef5cd2e905",
     "redaction": "仅摘取与赛题相关的内容。省略账号、认证信息、会话标识、无关聊天和内部推理。工具结果按字段节选或序列化，去掉临时目录和无关请求编号。",
     "material_base_revision": "42d79faa65b164fa8c1413109d538e4e071a2872"
   },
@@ -193,6 +193,25 @@
         "e15"
       ],
       "content": "我觉得上一轮适合数据量大、加载一次后会连续查很多次的场景，查得少时首查和内存的代价可能不值。这轮我会看算上首查的总耗时、峰值内存和逐条结果，再复测一下写入，看看慢的那 12% 能不能复现。如果写入没有稳定退化，我倾向保留。把这段原话和实测一起记进 JSON。"
+    },
+    {
+      "id": "a14",
+      "source": "agent",
+      "attribution": "verbatim_excerpt",
+      "content": "1. **你怎么看这轮收益和代价？** 缓存命中后，过滤查询 P50 在 1 万行和 10 万行分别下降 8.0% 和 16.0%，混合查询总耗时分别下降 4.1% 和 6.2%。首查变化较小，峰值内存差异不到 0.25 MiB。哪些结果让你决定保留？\n2. **你觉得哪些场景还需要验证？** 如果只补一组对照，你会选什么负载，看哪些指标？",
+      "timing": "after_e16"
+    },
+    {
+      "id": "u15",
+      "source": "student",
+      "attribution": "verbatim",
+      "content": "我觉得值得保留。重复查同一批值时，过滤查询确实快了，混合查询也有收益，首查和内存的代价我能接受。只补一组的话，我会选高基数、查询值很少重复的负载，看看缓存槽用满后总耗时、P95 和峰值内存有没有变差，再逐条核对 TopK。把这段原话和实测记进 conversation.json，跟代码放在同一个提交里推到正式分支。",
+      "reply_to": "a14",
+      "timing": "after_e16_before_e17",
+      "related_experiments": [
+        "e16",
+        "e17"
+      ]
     }
   ],
   "platform_feedback": [
@@ -464,6 +483,64 @@
         "recheck": "../contest-runtime/mvd-q8-vector-build-write-recheck-_416vzl3/comparison.json"
       },
       "limitations": "两轮均为本地对照，墙钟时间受宿主机和 I/O 调度影响。这里保留每轮耗时、ABBA 分块方向及 CPU 时间，用于判断原始差异是否重现。"
+    },
+    {
+      "id": "e16",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent",
+      "purpose": "测量单列 VARCHAR 等值过滤的行号缓存对首查、连续查询和峰值内存的影响。",
+      "source_revision": {
+        "baseline": "ea376806492d1103b8ab167ebb94408108d7305f",
+        "candidate": "fe827741cf5e9c4f7251686246657bef5cd2e905"
+      },
+      "environment": {
+        "compiler": "GCC 13.5.0",
+        "flags": "-std=c++17 -O3 -flto",
+        "cpus": 2,
+        "memory": "2 GiB",
+        "image_ids": {
+          "baseline": "sha256:b1e09ecf2f5b9a01550d1f00561b6c1b4029325ec4a89bc0aebdae76f9cb9d21",
+          "candidate": "sha256:25b65e2bdff62b022d98972515a0289a510b4d8e414a6eb493333283beee7232"
+        }
+      },
+      "method": "对照正式版，两组均为 128 维、K=10、一半带等值过滤，每个过滤值命中约 10% 的行。1 万行每轮 3,000 查询，10 万行每轮 128 查询，每版六轮，ABBA / BAAB / ABBA，独立容器和数据目录，逐条核对主键、顺序和距离。第一条为无过滤首查，第二条为首条过滤查询。后续查询和命中过滤 P50 从前十条之后统计，峰值为容器 cgroup memory.peak。",
+      "implementation": "每张表最多缓存一个 VARCHAR 列的 16 个等值条件。行号预算为热缓存额度的 1/64，上限 1 MiB。随热缓存失效。复合谓词、其他列、事务覆盖层及超预算时使用现有精确路径。",
+      "output": "{\"10k\":{\"baseline\":{\"first_query_ms\":4.222537,\"first_filtered_query_ms\":1.767163,\"warm_query_seconds\":2.041072,\"query_seconds\":2.057403,\"query_cpu_seconds\":0.440041,\"memory_peak_bytes_before_shutdown\":16558080.0,\"write_seconds\":0.319846,\"filtered_warm_p50_ms\":0.650455,\"unfiltered_warm_p50_ms\":0.668593,\"queries_verified\":18000},\"candidate\":{\"first_query_ms\":4.246266,\"first_filtered_query_ms\":1.581996,\"warm_query_seconds\":1.956984,\"query_seconds\":1.971911,\"query_cpu_seconds\":0.370726,\"memory_peak_bytes_before_shutdown\":16734208.0,\"write_seconds\":0.315453,\"filtered_warm_p50_ms\":0.598518,\"unfiltered_warm_p50_ms\":0.66688,\"queries_verified\":18000},\"candidate_change_percent\":{\"first_query_ms\":0.562,\"first_filtered_query_ms\":-10.4782,\"warm_query_seconds\":-4.1198,\"query_seconds\":-4.1553,\"query_cpu_seconds\":-15.7519,\"memory_peak_bytes_before_shutdown\":1.0637,\"write_seconds\":-1.3735,\"filtered_warm_p50_ms\":-7.9847,\"unfiltered_warm_p50_ms\":-0.2562},\"block_query_change_percent\":[-3.6515,-3.7438,-4.8287]},\"100k\":{\"baseline\":{\"first_query_ms\":55.992849,\"first_filtered_query_ms\":10.067566,\"warm_query_seconds\":0.135473,\"query_seconds\":0.213269,\"query_cpu_seconds\":0.245113,\"memory_peak_bytes_before_shutdown\":137900032.0,\"write_seconds\":3.071687,\"filtered_warm_p50_ms\":1.12245,\"unfiltered_warm_p50_ms\":1.158937,\"queries_verified\":768},\"candidate\":{\"first_query_ms\":50.402012,\"first_filtered_query_ms\":9.972203,\"warm_query_seconds\":0.127079,\"query_seconds\":0.200716,\"query_cpu_seconds\":0.21217,\"memory_peak_bytes_before_shutdown\":137646080.0,\"write_seconds\":3.047355,\"filtered_warm_p50_ms\":0.942994,\"unfiltered_warm_p50_ms\":1.172032,\"queries_verified\":768},\"candidate_change_percent\":{\"first_query_ms\":-9.9849,\"first_filtered_query_ms\":-0.9472,\"warm_query_seconds\":-6.1961,\"query_seconds\":-5.886,\"query_cpu_seconds\":-13.4399,\"memory_peak_bytes_before_shutdown\":-0.1842,\"write_seconds\":-0.7921,\"filtered_warm_p50_ms\":-15.9879,\"unfiltered_warm_p50_ms\":1.1299},\"block_query_change_percent\":[-8.554,-7.806,-5.2276]}}",
+      "validation_output": "{\"public_passed\":20,\"exact\":{\"passed\":true,\"queries_verified\":4800,\"oracle\":\"Python struct float32 + math.fsum; independent of engine\",\"cache_mb\":[0,64],\"stages\":[\"committed\",\"overlay\",\"updated\",\"restarted\"]},\"large\":{\"passed\":true,\"checks\":48,\"rows\":150001,\"threads\":2,\"cache_mb\":[0,64],\"recovery\":\"actual SIGKILL after acknowledged inserts\"},\"cache_edges\":{\"passed\":true,\"results\":[{\"cache_budget_mib\":1,\"rows_loaded\":5000,\"exact_queries_verified\":110},{\"cache_budget_mib\":64,\"rows_loaded\":5000,\"exact_queries_verified\":110}],\"cases\":[\"first miss and repeat\",\"more than 16 equality values\",\"case and unicode\",\"second column\",\"compound and inequality\",\"ties and ASC/DESC\",\"LIMIT 0\",\"overlay and rollback\",\"update/delete/insert commit\",\"SIGKILL restart\",\"budget fallback\"]},\"recovery\":{\"response_boundary\":{\"exact_limit\":394,\"default_wire_bytes\":16692054,\"large_rows\":156000,\"over_limit_rejected\":true},\"single_table_memory\":{\"limit\":\"96m\",\"tables\":1,\"inserted\":90000,\"survivors_after_sigkill\":89999},\"cross_table_memory\":{\"limit\":\"96m\",\"tables\":2,\"inserted\":90000,\"survivors_after_sigkill\":89998},\"single_before_commit\":{\"fault\":\"statement_before_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"single_after_commit\":{\"fault\":\"statement_after_commit\",\"recovery_fault\":\"recovery_mid\",\"committed\":true,\"legacy_log\":false},\"cross_before_publish\":{\"fault\":\"cross_txn_log_chunk\",\"recovery_fault\":\"recovery_mid\",\"committed\":false,\"legacy_log\":false},\"cross_after_publish\":{\"fault\":\"cross_txn_after_log\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"cross_after_first_table\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":false},\"legacy_cross_log\":{\"fault\":\"cross_txn_after_table\",\"recovery_fault\":\"cross_txn_recovery_after_table\",\"committed\":true,\"legacy_log\":true}}}",
+      "artifact_paths": {
+        "10k": "contest-runtime/mvd-varchar-row-cache-10k-2g4jccha/comparison.json",
+        "100k": "contest-runtime/mvd-varchar-row-cache-100k-io6g3uhm/comparison.json"
+      },
+      "limitations": "本地墙钟时间含协议和驱动开销。无过滤的 10 万行首查波动较大。内存差异很小，峰值包含写入、加载和查询阶段。未运行本次提交的正式评测。"
+    },
+    {
+      "id": "e17",
+      "source": "tool_result",
+      "status": "executed_local",
+      "executed_by": "Agent",
+      "purpose": "按学生建议验证高基数、查询值不重复时，行号缓存槽用满后的查询总耗时、P95 和峰值内存。",
+      "source_revision": {
+        "baseline": "ea376806492d1103b8ab167ebb94408108d7305f",
+        "candidate": "fe827741cf5e9c4f7251686246657bef5cd2e905"
+      },
+      "environment": {
+        "compiler": "GCC 13.5.0",
+        "flags": "-std=c++17 -O3 -flto",
+        "cpus": 2,
+        "memory": "2 GiB",
+        "image_ids": {
+          "baseline": "sha256:b1e09ecf2f5b9a01550d1f00561b6c1b4029325ec4a89bc0aebdae76f9cb9d21",
+          "candidate": "sha256:25b65e2bdff62b022d98972515a0289a510b4d8e414a6eb493333283beee7232"
+        }
+      },
+      "method": "复用同一对镜像、1 万行 128 维数据、3,000 条查询和交替顺序，每版六轮。字符串列有 2,000 个不同值，1,500 条过滤查询分别查不同值，每次匹配 5 行。前 16 个等值查询填满缓存槽，P95 从此后查询统计，同时记录全轮查询总耗时。无过滤真值使用独立标量 oracle，过滤真值从 float32 数据以 Python math.fsum 计算，逐条核对 TopK 主键、顺序和距离。",
+      "input_sql_sha256": "9cb1230221db9ee9a6ac61e1965af59965c5509dc22828cfab84658b81d529ed",
+      "output": "{\"baseline\":{\"query_seconds\":1.978333,\"memory_peak_bytes_before_shutdown\":16564224.0,\"write_seconds\":0.317254,\"p95_ms_after_slots_filled\":0.858431,\"filtered_p95_ms_after_slots_filled\":0.807555,\"queries_verified\":18000},\"candidate\":{\"query_seconds\":1.966227,\"memory_peak_bytes_before_shutdown\":16584704.0,\"write_seconds\":0.315173,\"p95_ms_after_slots_filled\":0.865062,\"filtered_p95_ms_after_slots_filled\":0.795166,\"queries_verified\":18000},\"candidate_change_percent\":{\"query_seconds\":-0.6119,\"memory_peak_bytes_before_shutdown\":0.1236,\"write_seconds\":-0.6559,\"p95_ms_after_slots_filled\":0.7725,\"filtered_p95_ms_after_slots_filled\":-1.5341},\"block_query_change_percent\":[-1.5194,-0.476,-0.6737]}",
+      "artifact_paths": {
+        "high_cardinality": "contest-runtime/mvd-varchar-row-cache-high-cardinality-6lcpt5wl/comparison.json"
+      },
+      "limitations": "本地测试覆盖等值条件无重复这一种高基数分布，峰值内存含全部运行阶段。墙钟时间包含协议与调度开销。"
     }
   ],
   "source_reviews": [
@@ -898,7 +975,41 @@
         }
       ],
       "note": "学生根据 e13 解释了适用负载，基于 e14 明确含首查总耗时、峰值内存、逐条结果和写入复测作为保留依据。e15 是 Agent 收到回复后执行的写入复测，保留结论在原话中是有条件的。"
+    },
+    {
+      "id": "q12",
+      "student_evidence": [
+        {
+          "pointer": "/conversations/26/content",
+          "quote": "我觉得值得保留。重复查同一批值时，过滤查询确实快了，混合查询也有收益，首查和内存的代价我能接受。只补一组的话，我会选高基数、查询值很少重复的负载，看看缓存槽用满后总耗时、P95 和峰值内存有没有变差，再逐条核对 TopK。把这段原话和实测记进 conversation.json，跟代码放在同一个提交里推到正式分支。"
+        }
+      ],
+      "agent_context": [
+        {
+          "pointer": "/conversations/25/content",
+          "quote": "1. **你怎么看这轮收益和代价？** 缓存命中后，过滤查询 P50 在 1 万行和 10 万行分别下降 8.0% 和 16.0%，混合查询总耗时分别下降 4.1% 和 6.2%。首查变化较小，峰值内存差异不到 0.25 MiB。哪些结果让你决定保留？\n2. **你觉得哪些场景还需要验证？** 如果只补一组对照，你会选什么负载，看哪些指标？"
+        }
+      ],
+      "result_evidence": [
+        {
+          "pointer": "/experiments/15/output",
+          "quote": "\"filtered_warm_p50_ms\":0.598518"
+        },
+        {
+          "pointer": "/experiments/15/output",
+          "quote": "\"filtered_warm_p50_ms\":0.942994"
+        },
+        {
+          "pointer": "/experiments/15/validation_output",
+          "quote": "\"public_passed\":20"
+        },
+        {
+          "pointer": "/experiments/16/output",
+          "quote": "{\"query_seconds\":-0.6119,\"memory_peak_bytes_before_shutdown\":0.1236,\"write_seconds\":-0.6559,\"p95_ms_after_slots_filled\":0.7725,\"filtered_p95_ms_after_slots_filled\":-1.5341}"
+        }
+      ],
+      "note": "学生解释了重复查询中的收益和首查、内存代价，明确提出高基数且查询值少重复作为补充验证，并指定总耗时、P95、峰值内存和逐条 TopK。e17 在收到回复后由 Agent 执行，学生的原话是复测前判断。"
     }
   ],
-  "material_summary": "本材料包含学生真实提问、事后判断与预先设计的反例，并逐项区分 Agent 判断和工具执行结果。既有证据涵盖 checkpoint、分块 INSERT、响应字节上限、事务提交内存和跨表崩溃恢复、精确 TopK 大数反例。本次补充学生要求探索更大幅优化并指定 GCC13 同条件逐条核对，随后由 Agent 实现 8 位编码安全筛选并测试：1 万行基本持平；10 万行扣除首查后的不同查询耗时降低约 20.6%，但首查和内存上升。学生随后要求将该原型和材料一起提测。所有新增性能数字均为本地结果，未写成正式成绩，也未虚构学生的算法推导或结果复盘。 后续复测使用已通过正式评测的 8 位版本作基线，批量构建编码使 10 万行首查从 79.81 ms 降到 40.13 ms，后续查询基本持平。 学生判断 8 位筛选更适合加载一次后连续查询较多的大数据场景，要求查看含首查总耗时、峰值内存和逐条结果，并复测写入差异。保留原话及后续对照实测。"
+  "material_summary": "本材料包含学生真实提问、事后判断与预先设计的反例，并逐项区分 Agent 判断和工具执行结果。既有证据涵盖 checkpoint、分块 INSERT、响应字节上限、事务提交内存和跨表崩溃恢复、精确 TopK 大数反例。本次补充学生要求探索更大幅优化并指定 GCC13 同条件逐条核对，随后由 Agent 实现 8 位编码安全筛选并测试：1 万行基本持平；10 万行扣除首查后的不同查询耗时降低约 20.6%，但首查和内存上升。学生随后要求将该原型和材料一起提测。所有新增性能数字均为本地结果，未写成正式成绩，也未虚构学生的算法推导或结果复盘。 后续复测使用已通过正式评测的 8 位版本作基线，批量构建编码使 10 万行首查从 79.81 ms 降到 40.13 ms，后续查询基本持平。 学生判断 8 位筛选更适合加载一次后连续查询较多的大数据场景，要求查看含首查总耗时、峰值内存和逐条结果，并复测写入差异。保留原话及后续对照实测。 单列 VARCHAR 等值过滤缓存的本地复测中，1 万和 10 万行缓存命中过滤 P50 分别下降约 8% 和 16%。学生接受首查与内存代价，并提出用高基数、查询值少重复的负载检查槽满后的总耗时、P95、峰值内存及 TopK。材料保留其完整原话和 Agent 后续实测。"
 }
