@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -114,6 +115,36 @@ __attribute__((target("avx2"))) inline uint32_t avx2(
     for (uint32_t lane : lanes) result += lane;
     return result;
 }
+// Each accumulator holds eight partial sums for one row. Reuse the
+// widened query across rows, then reduce all four sums in SIMD registers.
+__attribute__((target("avx2"))) inline unsigned reject_four_avx2(
+    const std::array<const int8_t*, 4>& rows, const int8_t* query,
+    size_t dim, int cutoff) {
+    __m256i sum0 = _mm256_setzero_si256();
+    __m256i sum1 = sum0, sum2 = sum0, sum3 = sum0;
+    for (size_t i = 0; i < dim; i += 16) {
+        const __m256i q = _mm256_cvtepi8_epi16(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(query + i)));
+        const __m256i a = _mm256_sub_epi16(_mm256_cvtepi8_epi16(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(rows[0] + i))), q);
+        const __m256i b = _mm256_sub_epi16(_mm256_cvtepi8_epi16(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(rows[1] + i))), q);
+        const __m256i c = _mm256_sub_epi16(_mm256_cvtepi8_epi16(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(rows[2] + i))), q);
+        const __m256i d = _mm256_sub_epi16(_mm256_cvtepi8_epi16(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(rows[3] + i))), q);
+        sum0 = _mm256_add_epi32(sum0, _mm256_madd_epi16(a, a));
+        sum1 = _mm256_add_epi32(sum1, _mm256_madd_epi16(b, b));
+        sum2 = _mm256_add_epi32(sum2, _mm256_madd_epi16(c, c));
+        sum3 = _mm256_add_epi32(sum3, _mm256_madd_epi16(d, d));
+    }
+    const __m256i halves = _mm256_hadd_epi32(
+        _mm256_hadd_epi32(sum0, sum1), _mm256_hadd_epi32(sum2, sum3));
+    const __m128i sums = _mm_add_epi32(
+        _mm256_castsi256_si128(halves), _mm256_extracti128_si256(halves, 1));
+    return static_cast<unsigned>(_mm_movemask_ps(
+        _mm_castsi128_ps(_mm_cmpgt_epi32(sums, _mm_set1_epi32(cutoff)))));
+}
 #endif
 
 struct Cache {
@@ -165,8 +196,15 @@ struct Query {
         cache = &data;
         simd = use_simd;
     }
-    bool rejects(size_t row, double worst) {
-        if (!cache || !std::isfinite(worst)) return false;
+    bool can_batch() const {
+#if defined(__x86_64__) || defined(__i386__)
+        return cache && simd && cache->dim % 16 == 0;
+#else
+        return false;
+#endif
+    }
+
+    void update_cutoff(double worst) {
         if (worst != previous) {
             // Each coordinate has <= scale/2 quantization error. Triangle
             // inequality: ||code(x)-code(q)|| <= d(x,q)/scale + sqrt(dim).
@@ -179,6 +217,36 @@ struct Query {
             cutoff = radius * radius * (1.0+1e-9);
             previous = worst;
         }
+    }
+
+    unsigned rejects_four(const std::array<size_t, 4>& indices, double worst) {
+#if defined(__x86_64__) || defined(__i386__)
+        update_cutoff(worst);
+        // For an integer distance, > floor(cutoff) is equivalent to > cutoff.
+        unsigned rejected = 0;
+        if (cutoff < std::numeric_limits<int>::max()) {
+            const auto* base = cache->codes.data();
+            const size_t dim = cache->dim;
+            const std::array<const int8_t*, 4> rows{
+                base + indices[0] * dim, base + indices[1] * dim,
+                base + indices[2] * dim, base + indices[3] * dim};
+            rejected = reject_four_avx2(rows, codes.data(), dim, static_cast<int>(cutoff));
+        }
+        if (stats.enabled) {
+            stats.examined.fetch_add(4, std::memory_order_relaxed);
+            stats.rejected.fetch_add(__builtin_popcount(rejected), std::memory_order_relaxed);
+        }
+        return rejected;
+#else
+        (void)indices;
+        (void)worst;
+        return 0;
+#endif
+    }
+
+    bool rejects(size_t row, double worst) {
+        if (!cache || !std::isfinite(worst)) return false;
+        update_cutoff(worst);
         const int8_t* p = cache->codes.data() + row * cache->dim;
         uint32_t sq;
 #if defined(__x86_64__) || defined(__i386__)

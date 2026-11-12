@@ -23,6 +23,8 @@ struct Segment {
     int fd = -1;
     std::string path;
     uint64_t len = 0;
+    uint64_t reserved_end = 0;
+    bool preallocation_disabled = false;
 
     Segment() = default;
     Segment(const Segment&) = delete;
@@ -33,6 +35,7 @@ struct Segment {
 
     static Segment open(const std::string& path);
     void reopen();
+    void reserve_append(size_t bytes);
     std::pair<uint64_t, uint32_t> append(
         const Schema& schema,
         const std::vector<Op>& ops,

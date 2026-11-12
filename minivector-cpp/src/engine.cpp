@@ -2,6 +2,7 @@
 #include "exact_scan.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -794,18 +795,7 @@ double l2_distance_raw(
     const uint8_t* row,
     const float* query,
     size_t size) {
-    double sum = 0.0, correction = 0.0;
-    for (size_t index = 0; index < size; ++index) {
-        float value = 0.0f;
-        std::memcpy(&value, row + index * sizeof(float), sizeof(value));
-        double diff = static_cast<double>(value) -
-                      static_cast<double>(query[index]);
-        const double term = diff * diff;
-        const double next = sum + term;
-        correction += sum >= term ? (sum - next) + term : (term - next) + sum;
-        sum = next;
-    }
-    return static_cast<double>(std::sqrt(static_cast<long double>(sum) + correction));
+    return exact_scan::distance_raw(row, query, size);
 }
 
 double l2_distance_ptr(const float* a, const float* b, size_t size) {
@@ -1001,6 +991,14 @@ bool predicate_hot_compatible_with_strings(
         }
     }
     return true;
+}
+
+bool predicate_stream_compatible(const Predicate& predicate, const Schema& schema) {
+    return predicate_hot_compatible_with_strings(predicate, schema) &&
+        std::all_of(predicate.clauses.begin(), predicate.clauses.end(),
+            [](const Predicate::Clause& clause) {
+                return clause.value.kind != Value::Kind::Str || clause.op == CmpOp::Eq;
+            });
 }
 
 bool hot_matches(const HotSet& hot, const Predicate& predicate, size_t row) {
@@ -3136,13 +3134,14 @@ std::optional<Row> Table::get_effective_row(
     return get_row(pk);
 }
 
-void Table::commit_ops(const std::vector<Op>& ops, bool compact_after) {
+void Table::commit_ops(const std::vector<Op>& ops, bool compact_after,
+                       bool covered_by_durable_redo) {
     if (ops.empty()) {
         return;
     }
     hot.reset();
     ann.reset();
-    auto appended = seg.append(schema, ops, fsync);
+    auto appended = seg.append(schema, ops, fsync && !covered_by_durable_redo);
     uint64_t offset = appended.first;
     uint32_t record_length = appended.second;
     records.emplace_back(offset, record_length);
@@ -4533,6 +4532,32 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         const std::vector<float>& query = *distance_target->query;
         bool use_avx = avx2_available();
         const exact_scan::Bound bound(hot.dim);
+        auto scan_hot = [&](size_t begin, size_t end, const auto& worst, const auto& consider) {
+            quantized_scan::Query quantized(hot.quantized, query, use_avx, asc);
+            const bool batch = !check_predicate && quantized.can_batch();
+            const auto row_index = [&](size_t offset) -> size_t {
+                return selected ? selected->rows[offset] : offset;
+            };
+            for (size_t offset = begin; offset < end;) {
+                const double threshold = worst();
+                if (batch && end - offset >= 4 && std::isfinite(threshold)) {
+                    const std::array<size_t, 4> indices{
+                        row_index(offset), row_index(offset + 1),
+                        row_index(offset + 2), row_index(offset + 3)};
+                    // The heap's worst score can only improve during the batch,
+                    // so using the earlier score may retain extra rows safely.
+                    const unsigned rejected = quantized.rejects_four(indices, threshold);
+                    for (size_t lane = 0; lane < indices.size(); ++lane) {
+                        if ((rejected & (1u << lane)) == 0) consider(indices[lane]);
+                    }
+                    offset += indices.size();
+                    continue;
+                }
+                const size_t index = row_index(offset++);
+                if (check_predicate && !hot_matches(hot, predicate, index)) continue;
+                if (!quantized.rejects(index, threshold)) consider(index);
+            }
+        };
         std::vector<HotCandidate> candidates;
         if (hot.pks.size() >= 50000) {
             // Large vector sets use bounded per-worker heaps instead of an
@@ -4545,18 +4570,16 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                                  size_t end,
                                  std::vector<HotCandidate>& output) {
                 HotHeap heap(HotCompare{asc});
-                quantized_scan::Query quantized(hot.quantized, query, use_avx, asc);
-                for (size_t offset = begin; offset < end; ++offset) {
-                    const size_t index = selected ? selected->rows[offset] : offset;
-                    if (check_predicate && !hot_matches(hot, predicate, index)) {
-                        continue;
-                    }
-                    if (heap.size() == keep && quantized.rejects(index, heap.top().distance)) continue;
+                const auto worst = [&] {
+                    return heap.size() == keep ? heap.top().distance
+                        : std::numeric_limits<double>::infinity();
+                };
+                scan_hot(begin, end, worst, [&](size_t index) {
                     const float* row = hot.vectors.data() + index * hot.dim;
                     float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
                                              query.data(), hot.dim, use_avx);
                     if (heap.size() == keep &&
-                        bound.rejects(approx, heap.top().distance, asc)) continue;
+                        bound.rejects(approx, heap.top().distance, asc)) return;
                     HotCandidate candidate{
                         l2_distance_ptr(row, query.data(), hot.dim), hot.pks[index], index};
                     if (heap.size() < keep) {
@@ -4565,7 +4588,7 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                         heap.pop();
                         heap.push(candidate);
                     }
-                }
+                });
                 output.reserve(heap.size());
                 while (!heap.empty()) {
                     output.push_back(heap.top());
@@ -4618,18 +4641,16 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         } else {
             candidates.reserve(std::min(keep, scan_count));
             const HotCompare compare{asc};
-            quantized_scan::Query quantized(hot.quantized, query, use_avx, asc);
-            for (size_t offset = 0; offset < scan_count; ++offset) {
-                const size_t index = selected ? selected->rows[offset] : offset;
-                if (check_predicate && !hot_matches(hot, predicate, index)) {
-                    continue;
-                }
-                if (candidates.size() == keep && quantized.rejects(index, candidates.front().distance)) continue;
+            const auto worst = [&] {
+                return candidates.size() == keep ? candidates.front().distance
+                    : std::numeric_limits<double>::infinity();
+            };
+            scan_hot(0, scan_count, worst, [&](size_t index) {
                 const float* row = hot.vectors.data() + index * hot.dim;
                 float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
                                          query.data(), hot.dim, use_avx);
                 if (candidates.size() == keep &&
-                    bound.rejects(approx, candidates.front().distance, asc)) continue;
+                    bound.rejects(approx, candidates.front().distance, asc)) return;
                 HotCandidate candidate{
                     l2_distance_ptr(row, query.data(), hot.dim), hot.pks[index], index};
                 if (candidates.size() < keep) {
@@ -4640,7 +4661,7 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                     candidates.back() = candidate;
                     std::push_heap(candidates.begin(), candidates.end(), compare);
                 }
-            }
+            });
         }
         std::sort(candidates.begin(), candidates.end(), HotCompare{asc});
         struct HotFinal {
@@ -4719,13 +4740,13 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         distance_target.has_value() &&
         (overlay == nullptr || overlay->empty()) &&
         !table.cache_covers_all() &&
-        predicate_hot_compatible(predicate, schema) &&
+        predicate_stream_compatible(predicate, schema) &&
         schema.columns[distance_target->column].type.kind == TypeKind::Vector &&
         distance_target->query->size() ==
             schema.columns[distance_target->column].type.n) {
         // Bounded-memory exact TopK for tables larger than the decoded-row
-        // cache: scan record payloads and touch only the vector column and
-        // BIGINT filter columns.  No Row/Value allocations and no CRC pass.
+        // cache. Evaluate predicates from the record payload before scoring
+        // vectors. VARCHAR equality reads borrowed bytes within the payload.
         const size_t vector_column = distance_target->column;
         const uint32_t dim = schema.columns[vector_column].type.n;
         const float* query = distance_target->query->data();
@@ -4752,11 +4773,17 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
             StreamCandidate,
             std::vector<StreamCandidate>,
             StreamCompare>;
+        const bool filter_strings = std::any_of(
+            predicate.clauses.begin(), predicate.clauses.end(),
+            [](const Predicate::Clause& clause) {
+                return clause.value.kind == Value::Kind::Str;
+            });
         auto process_payload = [&](uint64_t offset,
                                    const uint8_t* payload,
                                    size_t size,
                                    StreamHeap& heap,
-                                   std::vector<int64_t>& int_values) {
+                                   std::vector<int64_t>& int_values,
+                                   std::vector<std::string_view>& string_values) {
             RawPayloadReader reader(payload, size);
             uint32_t op_count = reader.u32();
             for (uint32_t op_index = 0; op_index < op_count; ++op_index) {
@@ -4778,7 +4805,11 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                             break;
                         case TypeKind::Varchar: {
                             uint32_t length = reader.u32();
-                            reader.take(length);
+                            const uint8_t* bytes = reader.take(length);
+                            if (filter_strings) {
+                                string_values[column] = std::string_view(
+                                    reinterpret_cast<const char*>(bytes), length);
+                            }
                             break;
                         }
                         case TypeKind::Vector: {
@@ -4801,10 +4832,10 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                 }
                 bool matches = true;
                 for (const Predicate::Clause& clause : predicate.clauses) {
-                    if (!compare_int(
-                            int_values[clause.column],
-                            clause.value.i,
-                            clause.op)) {
+                    const bool matches_clause = clause.value.kind == Value::Kind::Str
+                        ? string_values[clause.column] == clause.value.s
+                        : compare_int(int_values[clause.column], clause.value.i, clause.op);
+                    if (!matches_clause) {
                         matches = false;
                         break;
                     }
@@ -4829,6 +4860,7 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         };
         auto scan_range = [&](uint64_t start, uint64_t end, StreamHeap& heap) {
             std::vector<int64_t> int_values(schema.columns.size(), 0);
+            std::vector<std::string_view> string_values(filter_strings ? schema.columns.size() : 0);
             scan_segment_raw_range(
                 table.path,
                 start,
@@ -4837,7 +4869,7 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                     uint32_t,
                     const uint8_t* payload,
                     size_t size) {
-                    process_payload(offset, payload, size, heap, int_values);
+                    process_payload(offset, payload, size, heap, int_values, string_values);
                 });
         };
         size_t requested_threads = threads;
@@ -5364,8 +5396,13 @@ void Database::apply_transaction_batches(bool recovering) {
         fail_internal("cannot open transaction batches");
     }
     Table* previous = nullptr;
+    const char* mode = std::getenv("MVDB_REDO_BATCH_SYNC");
+    const bool batch_sync = !mode || std::string(mode) != "0";
     auto finish_table = [&] {
-        if (!previous->fsync && ::fdatasync(previous->seg.fd) != 0) {
+        crash_point(recovering ? "cross_txn_recovery_before_table_sync" : "cross_txn_before_table_sync");
+        // The published redo remains durable until *all* table files are
+        // durable. Sync each table once instead of every 1 MiB replay chunk.
+        if ((batch_sync || !previous->fsync) && ::fdatasync(previous->seg.fd) != 0) {
             fail_io("sync replayed transaction batches", errno);
         }
         crash_point(recovering ? "cross_txn_recovery_after_table" : "cross_txn_after_table");
@@ -5404,7 +5441,8 @@ void Database::apply_transaction_batches(bool recovering) {
         }
         // These operations contain final row images or tombstones. Replaying
         // an already applied batch replaces the same logical rows.
-        table->commit_ops(decode_record(table->schema, record.data(), record.size()), false);
+        table->commit_ops(decode_record(table->schema, record.data(), record.size()), false, batch_sync);
+        crash_point(recovering ? "cross_txn_recovery_after_chunk" : "cross_txn_after_chunk");
     }
     if (!previous) {
         fail_internal("empty transaction batch log");
@@ -5413,6 +5451,7 @@ void Database::apply_transaction_batches(bool recovering) {
     if (!recovering) {
         crash_point("cross_txn_after_tables");
     }
+    crash_point(recovering ? "cross_txn_recovery_before_unlink" : "cross_txn_before_unlink");
     std::filesystem::remove(path);
     fsync_dir(dir);
     crash_point(recovering ? "cross_txn_recovery_after_applied" : "cross_txn_after_applied");

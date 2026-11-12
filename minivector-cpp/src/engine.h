@@ -185,7 +185,8 @@ public:
     std::optional<Row> get_effective_row(
         const TxnOverlay* overlay,
         int64_t pk);
-    void commit_ops(const std::vector<Op>& ops, bool compact_after = true);
+    void commit_ops(const std::vector<Op>& ops, bool compact_after = true,
+                    bool covered_by_durable_redo = false);
     void compact();
 
     void for_each_row_merged(

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -340,7 +341,8 @@ std::vector<Op> decode_payload(const Schema& schema, const uint8_t* data, size_t
 }  // namespace
 
 Segment::Segment(Segment&& other) noexcept
-    : fd(other.fd), path(std::move(other.path)), len(other.len) {
+    : fd(other.fd), path(std::move(other.path)), len(other.len),
+      reserved_end(other.reserved_end), preallocation_disabled(other.preallocation_disabled) {
     other.fd = -1;
     other.len = 0;
 }
@@ -353,6 +355,8 @@ Segment& Segment::operator=(Segment&& other) noexcept {
         fd = other.fd;
         path = std::move(other.path);
         len = other.len;
+        reserved_end = other.reserved_end;
+        preallocation_disabled = other.preallocation_disabled;
         other.fd = -1;
         other.len = 0;
     }
@@ -380,6 +384,7 @@ Segment Segment::open(const std::string& file_path) {
     segment.fd = descriptor;
     segment.path = file_path;
     segment.len = static_cast<uint64_t>(info.st_size);
+    segment.reserved_end = segment.len;
     return segment;
 }
 
@@ -399,6 +404,52 @@ void Segment::reopen() {
     }
     fd = descriptor;
     len = static_cast<uint64_t>(info.st_size);
+    reserved_end = len;
+    preallocation_disabled = false;
+}
+
+void Segment::reserve_append(size_t bytes) {
+#if defined(__linux__)
+    // Reserve blocks only: st_size and the append/recovery boundary must remain
+    // unchanged. fdatasync after the record still establishes durability.
+    static const uint64_t quantum = [] {
+        const char* text = std::getenv("MVDB_PREALLOC_BYTES");
+        if (!text) return uint64_t(4u << 20);
+        char* end = nullptr;
+        errno = 0;
+        const unsigned long long value = std::strtoull(text, &end, 10);
+        if (errno || end == text || *end || value > (64u << 20) ||
+            (value != 0 && (value < 4096 || value % 4096))) return uint64_t(4u << 20);
+        return uint64_t(value);
+    }();
+    if (!quantum || preallocation_disabled) return;
+    const uint64_t maximum = uint64_t(std::numeric_limits<off_t>::max());
+    if (bytes > maximum || len > maximum - bytes || len + bytes > maximum - quantum) return;
+    const uint64_t required = len + bytes;
+    if (required <= reserved_end) return;
+    const uint64_t target = ((required + quantum - 1)/quantum)*quantum;
+    const uint64_t start = std::max(len, reserved_end);
+    int result;
+    do {
+        result = ::fallocate(fd, FALLOC_FL_KEEP_SIZE, static_cast<off_t>(start),
+                             static_cast<off_t>(target-start));
+    } while (result != 0 && errno == EINTR);
+    if (result == 0) {
+        reserved_end = target;
+        return;
+    }
+    const int error = errno;
+    // A large optional reservation can fail while the actual append still
+    // fits. Fall back to ordinary durable writes on unsupported/quota cases.
+    if (error == EOPNOTSUPP || error == ENOSYS || error == EINVAL ||
+        error == ENOSPC || error == EDQUOT) {
+        preallocation_disabled = true;
+        return;
+    }
+    fail_io("preallocate segment", error);
+#else
+    (void)bytes;
+#endif
 }
 
 std::pair<uint64_t, uint32_t> Segment::append(
@@ -415,6 +466,7 @@ std::pair<uint64_t, uint32_t> Segment::append(
     }
     record[4] = flags;
     uint64_t offset = len;
+    reserve_append(record.size());
     crash_point("wal_before_write");
     if (crash_point_hit("wal_partial_write")) {
         size_t half = record.size() / 2;
