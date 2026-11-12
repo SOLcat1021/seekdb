@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <vector>
 #if defined(__x86_64__) || defined(__i386__)
@@ -24,6 +25,15 @@ struct Stats {
 };
 inline Stats stats;
 
+inline float maximum_abs_scalar(const float* values, size_t count) {
+    float maximum = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (!std::isfinite(values[i])) return std::numeric_limits<float>::infinity();
+        maximum = std::max(maximum, std::abs(values[i]));
+    }
+    return maximum;
+}
+
 inline uint32_t scalar(const int8_t* a, const int8_t* b, size_t n) {
     uint32_t sum = 0;
     for (size_t i = 0; i < n; ++i) {
@@ -33,6 +43,50 @@ inline uint32_t scalar(const int8_t* a, const int8_t* b, size_t n) {
     return sum;
 }
 #if defined(__x86_64__) || defined(__i386__)
+__attribute__((target("avx2"))) inline float maximum_abs_avx2(
+    const float* values, size_t count) {
+    const __m256i magnitude_mask = _mm256_set1_epi32(0x7fffffff);
+    __m256i maximum_bits = _mm256_setzero_si256();
+    size_t i = 0;
+    for (; i + 8 <= count; i += 8) {
+        const __m256i bits = _mm256_castps_si256(_mm256_loadu_ps(values + i));
+        maximum_bits = _mm256_max_epu32(maximum_bits, _mm256_and_si256(bits, magnitude_mask));
+    }
+    alignas(32) uint32_t lanes[8];
+    _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), maximum_bits);
+    // Nonnegative binary32 bit patterns order finite values by magnitude.
+    // Infinity and every NaN sort above the largest finite float.
+    const uint32_t bits = *std::max_element(lanes, lanes + 8);
+    if (bits >= 0x7f800000) return std::numeric_limits<float>::infinity();
+    float maximum;
+    std::memcpy(&maximum, &bits, sizeof(maximum));
+    return std::max(maximum, maximum_abs_scalar(values + i, count - i));
+}
+
+__attribute__((target("avx2"))) inline __m128i encode_four(
+    const float* values, __m256d inverse_step) {
+    const __m256d scaled = _mm256_mul_pd(_mm256_cvtps_pd(_mm_loadu_ps(values)), inverse_step);
+    const __m256d half = _mm256_or_pd(_mm256_set1_pd(0.5),
+                                    _mm256_and_pd(scaled, _mm256_set1_pd(-0.0)));
+    // Scaling by a power of two preserves binary32 precision in binary64.
+    // Rounding the sum in binary64 cannot move a non-tie across an integer.
+    return _mm256_cvttpd_epi32(_mm256_add_pd(scaled, half));
+}
+
+__attribute__((target("avx2"))) inline size_t encode_avx2(
+    const float* values, int8_t* codes, size_t count, double step) {
+    const __m256d inverse_step = _mm256_set1_pd(1.0 / step);
+    size_t i = 0;
+    for (; i + 16 <= count; i += 16) {
+        const __m128i first = _mm_packs_epi32(
+            encode_four(values + i, inverse_step), encode_four(values + i + 4, inverse_step));
+        const __m128i second = _mm_packs_epi32(
+            encode_four(values + i + 8, inverse_step), encode_four(values + i + 12, inverse_step));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(codes + i), _mm_packs_epi16(first, second));
+    }
+    return i;
+}
+
 __attribute__((target("avx2"))) inline __m256i square16(const int8_t* a, const int8_t* b) {
     __m256i x = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i*)a));
     __m256i y = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i*)b));
@@ -66,20 +120,28 @@ struct Cache {
     size_t dim = 0;
     double scale = 0;
     std::vector<int8_t> codes;
-    void build(const std::vector<float>& values, size_t dimension) {
+    void build(const std::vector<float>& values, size_t dimension, bool allow_avx2 = true) {
         if (dimension == 0 || dimension > 4096 || values.empty() ||
             values.size() % dimension) return;
-        double maximum = 0;
-        for (float x : values) {
-            if (!std::isfinite(x)) return;
-            maximum = std::max(maximum, std::abs(double(x)));
-        }
+#if defined(__x86_64__) || defined(__i386__)
+        const bool use_avx2 = allow_avx2 && __builtin_cpu_supports("avx2");
+        const double maximum = use_avx2 ? maximum_abs_avx2(values.data(), values.size())
+                                        : maximum_abs_scalar(values.data(), values.size());
+#else
+        (void)allow_avx2;
+        const double maximum = maximum_abs_scalar(values.data(), values.size());
+#endif
+        if (!std::isfinite(maximum)) return;
         int exponent = 0;
         std::frexp(maximum, &exponent);
         double step = maximum == 0 ? 1.0 : std::ldexp(1.0, exponent-7);
         if (maximum > 127.0 * step) step *= 2;
         std::vector<int8_t> encoded(values.size());
-        for (size_t i = 0; i < values.size(); ++i)
+        size_t i = 0;
+#if defined(__x86_64__) || defined(__i386__)
+        if (use_avx2) i = encode_avx2(values.data(), encoded.data(), values.size(), step);
+#endif
+        for (; i < values.size(); ++i)
             encoded[i] = int8_t(std::round(double(values[i]) / step));
         dim = dimension;
         scale = step;
