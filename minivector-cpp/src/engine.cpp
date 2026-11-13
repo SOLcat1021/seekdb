@@ -4801,6 +4801,7 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         const bool use_avx = avx2_available();
         const size_t keep = limit;
         const exact_scan::Bound bound(dim);
+        static const bool packed_screen = std::getenv("MVD_DISABLE_PACKED_SCREEN") == nullptr;
         struct StreamCandidate {
             double exact;
             int64_t pk;
@@ -4901,6 +4902,16 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                     fail_internal("storage corrupted: missing raw vector");
                 }
                 if (dictionary) {
+#if defined(__x86_64__) || defined(__i386__)
+                    if (packed_screen && use_avx && asc && dim % 16 == 0 &&
+                        packed_size == vector_block::packed_prefix(dim) && heap.size() == keep &&
+                        bound.relative < 0.25) {
+                        const double worst = heap.top().exact;
+                        const double threshold = worst * worst;
+                        const double cutoff = threshold + threshold * bound.relative + bound.absolute;
+                        if (vector_block::screen_dense({raw_vector, dictionary, packed_size}, query, dim, cutoff)) continue;
+                    }
+#endif
                     scratch.resize(dim * sizeof(float));
                     vector_block::decode({raw_vector, dictionary, packed_size}, dim, scratch.data());
                     raw_vector = scratch.data();
