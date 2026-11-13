@@ -95,6 +95,20 @@ struct HotSet {
     std::vector<PackedLocation> packed_vectors;
     std::vector<std::optional<std::vector<int64_t>>> int_columns;
     std::vector<std::optional<std::vector<std::string>>> str_columns;
+    std::vector<std::vector<uint32_t>> string_offsets;
+
+    bool has_string_column(size_t column) const {
+        return str_columns[column].has_value() ||
+            (!string_offsets.empty() && !string_offsets[column].empty());
+    }
+
+    std::string_view string_at(size_t column, size_t row) const {
+        if (str_columns[column]) return (*str_columns[column])[row];
+        const uint8_t* data = mapped.get() + string_offsets[column][row];
+        const uint32_t length = uint32_t(data[0]) | (uint32_t(data[1]) << 8) |
+            (uint32_t(data[2]) << 16) | (uint32_t(data[3]) << 24);
+        return {reinterpret_cast<const char*>(data + sizeof(length)), length};
+    }
 
     const uint8_t* vector_bytes(size_t row, std::vector<uint8_t>& scratch) const {
         if (mapped) {

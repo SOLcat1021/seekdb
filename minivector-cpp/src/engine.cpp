@@ -579,7 +579,7 @@ bool compare_int(int64_t left, int64_t right, CmpOp op) {
     return false;
 }
 
-bool compare_str(const std::string& left, const std::string& right, CmpOp op) {
+bool compare_str(std::string_view left, std::string_view right, CmpOp op) {
     switch (op) {
         case CmpOp::Eq:
             return left == right;
@@ -1012,12 +1012,11 @@ bool hot_matches(const HotSet& hot, const Predicate& predicate, size_t row) {
             continue;
         }
         if (clause.column >= hot.str_columns.size() ||
-            !hot.str_columns[clause.column].has_value()) {
+            !hot.has_string_column(clause.column)) {
             return false;
         }
-        const auto& column = hot.str_columns[clause.column].value();
-        if (row >= column.size() ||
-            !compare_str(column[row], clause.value.s, clause.op)) {
+        if (row >= hot.pks.size() ||
+            !compare_str(hot.string_at(clause.column, row), clause.value.s, clause.op)) {
             return false;
         }
     }
@@ -1034,19 +1033,19 @@ std::optional<HotRowSelection> select_hot_string_rows(
     if (predicate.clauses.size() != 1) return std::nullopt;
     const Predicate::Clause& clause = predicate.clauses.front();
     if (clause.op != CmpOp::Eq || clause.value.kind != Value::Kind::Str ||
-        !hot.str_columns[clause.column]) return std::nullopt;
+        !hot.has_string_column(clause.column)) return std::nullopt;
 
-    const auto& values = *hot.str_columns[clause.column];
-    if (values.empty()) return HotRowSelection{nullptr, 0};
+    const size_t row_count = hot.pks.size();
+    if (row_count == 0) return HotRowSelection{nullptr, 0};
     auto& cache = hot.string_rows;
     if (!cache.rows) {
         const size_t budget = std::min<size_t>(cache_budget / 64, 1024u * 1024u);
         if (budget <= sizeof(cache) ||
-            values.size() > (budget - sizeof(cache)) / sizeof(uint32_t)) {
+            row_count > (budget - sizeof(cache)) / sizeof(uint32_t)) {
             return std::nullopt;
         }
         try {
-            cache.rows.reset(new uint32_t[values.size()]);
+            cache.rows.reset(new uint32_t[row_count]);
         } catch (const std::bad_alloc&) {
             return std::nullopt;
         }
@@ -1056,7 +1055,7 @@ std::optional<HotRowSelection> select_hot_string_rows(
 
     for (size_t i = 0; i < cache.range_count; ++i) {
         const auto& range = cache.ranges[i];
-        if (values[cache.rows[range.begin]] == clause.value.s) {
+        if (hot.string_at(clause.column, cache.rows[range.begin]) == clause.value.s) {
             return HotRowSelection{cache.rows.get() + range.begin, range.count};
         }
     }
@@ -1065,8 +1064,8 @@ std::optional<HotRowSelection> select_hot_string_rows(
     // Distinct equality values select disjoint rows. The packed allocation
     // therefore holds every cached list without exceeding the budget.
     const uint32_t begin = cache.used;
-    for (size_t i = 0; i < values.size(); ++i) {
-        if (values[i] == clause.value.s) cache.rows[cache.used++] = uint32_t(i);
+    for (size_t i = 0; i < row_count; ++i) {
+        if (hot.string_at(clause.column, i) == clause.value.s) cache.rows[cache.used++] = uint32_t(i);
     }
     const uint32_t count = cache.used - begin;
     if (count != 0) cache.ranges[cache.range_count++] = {begin, count};
@@ -2393,6 +2392,27 @@ bool Table::ensure_hot() {
         }
     }
     set.pks.reserve(entries.size());
+    static const bool map_strings = std::getenv("MVD_DISABLE_MAPPED_VARCHAR") == nullptr;
+    std::vector<size_t> mapped_columns;
+    std::vector<uint32_t> row_strings;
+    if (map_strings && set.mapped && seg.len <= std::numeric_limits<uint32_t>::max()) {
+        const size_t row_budget = std::min<size_t>(cache_budget / 16, 4u * 1024u * 1024u) /
+                                  entries.size() / sizeof(uint32_t);
+        for (size_t index = 0; index < schema.columns.size() && mapped_columns.size() < row_budget; ++index) {
+            if (schema.columns[index].type.kind == TypeKind::Varchar) mapped_columns.push_back(index);
+        }
+        if (!mapped_columns.empty()) {
+            try {
+                set.string_offsets.resize(schema.columns.size());
+                row_strings.resize(schema.columns.size());
+                for (size_t index : mapped_columns) set.string_offsets[index].reserve(entries.size());
+            } catch (const std::bad_alloc&) {
+                set.string_offsets.clear();
+                mapped_columns.clear();
+                row_strings.clear();
+            }
+        }
+    }
     if (set.mapped) {
         set.vector_offsets.reserve(entries.size());
         if (seg.has_vector_blocks) set.packed_vectors.reserve(entries.size());
@@ -2427,7 +2447,11 @@ bool Table::ensure_hot() {
                             break;
                         case TypeKind::Varchar: {
                             uint32_t length = reader.u32();
-                            reader.take(length);
+                            const uint8_t* text = reader.take(length);
+                            if (!row_strings.empty()) {
+                                row_strings[index] = static_cast<uint32_t>(offset + kRawRecordHeaderSize +
+                                    (text - payload) - sizeof(length));
+                            }
                             break;
                         }
                         case TypeKind::Vector: {
@@ -2452,6 +2476,7 @@ bool Table::ensure_hot() {
                     fail_internal("storage corrupted: missing vector in hot build");
                 }
                 set.pks.push_back(pk);
+                for (size_t index : mapped_columns) set.string_offsets[index].push_back(row_strings[index]);
                 for (size_t index = 0; index < schema.columns.size(); ++index) {
                     if (set.int_columns[index].has_value()) {
                         set.int_columns[index]->push_back(row_ints[index]);
@@ -2502,7 +2527,7 @@ bool Table::ensure_hot_string_column(size_t column) {
         return false;
     }
     auto& slot = hot->str_columns[column];
-    if (slot.has_value()) {
+    if (hot->has_string_column(column)) {
         return true;
     }
     const size_t limit = std::max<size_t>(
