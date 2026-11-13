@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <charconv>
+#include <cerrno>
 #include <csignal>
 #include <cctype>
 #include <cmath>
@@ -444,7 +446,15 @@ void append_json_value(std::string& out, const OutputValue& value) {
             out += json_quote(value.s);
             return;
         case OutputValue::Kind::Float:
-            out += std::isfinite(value.f) ? format_f64(value.f) : "0";
+            if (std::isfinite(value.f) && value.f != 0) {
+                char buffer[64];
+                const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value.f);
+                if (result.ec == std::errc()) {
+                    out.append(buffer, result.ptr);
+                    return;
+                }
+            }
+            out.push_back('0');
             return;
         case OutputValue::Kind::Vec:
             out.push_back('[');
@@ -549,20 +559,21 @@ std::string json_response(
         out += "],\"rows\":[";
         bool first_row = true;
         for (const auto& row : response.query.rows) {
-            std::string encoded;
-            encoded.push_back('[');
-            for (size_t index = 0; index < row.size(); ++index) {
-                if (index > 0) {
-                    encoded.push_back(',');
-                }
-                append_json_value(encoded, row[index]);
-            }
-            encoded.push_back(']');
             if (!first_row) {
                 out.push_back(',');
             }
             first_row = false;
-            out += encoded;
+            out.push_back('[');
+            for (size_t index = 0; index < row.size(); ++index) {
+                if (index > 0) {
+                    out.push_back(',');
+                }
+                append_json_value(out, row[index]);
+                if (out.size() > max_response_bytes) {
+                    throw ResponseTooLarge{};
+                }
+            }
+            out.push_back(']');
             if (out.size() + 3 > max_response_bytes) {
                 throw ResponseTooLarge{};
             }
@@ -1043,6 +1054,20 @@ void run_text(
     }
 }
 
+bool write_json(std::string_view response) {
+    while (!response.empty()) {
+        const ssize_t written = ::write(STDOUT_FILENO, response.data(), response.size());
+        if (written < 0 && errno == EINTR && !stop_requested) {
+            continue;
+        }
+        if (written <= 0) {
+            return false;
+        }
+        response.remove_prefix(static_cast<size_t>(written));
+    }
+    return true;
+}
+
 void run_json_loop(
     Database& database,
     std::optional<Txn>& txn,
@@ -1056,16 +1081,14 @@ void run_json_loop(
         JsonParser parser(line);
         if (!parser.parse(request) || !request.has_id || request.op.empty()) {
             DbError error(1064, "42000", "invalid JSON request");
-            std::cout << json_error_response("0", error);
-            std::cout.flush();
+            if (!write_json(json_error_response("0", error))) return;
             continue;
         }
+        std::string encoded;
         try {
             if (request.op == "shutdown") {
                 txn.reset();
-                std::cout << json_response(
-                    request.id_json, Response::ok(), max_response_bytes);
-                std::cout.flush();
+                write_json(json_response(request.id_json, Response::ok(), max_response_bytes));
                 return;
             }
             if (request.op != "execute") {
@@ -1084,20 +1107,19 @@ void run_json_loop(
                 Stmt statement = parse_statement(sql);
                 response = database.execute(statement, txn);
             }
-            std::cout << json_response(
-                request.id_json, response, max_response_bytes);
+            encoded = json_response(request.id_json, response, max_response_bytes);
         } catch (const ResponseTooLarge&) {
-            std::cout << json_error_response(
+            encoded = json_error_response(
                 request.id_json,
                 "response_too_large",
                 "result exceeds the response wire limit");
         } catch (const DbError& error) {
-            std::cout << json_error_response(request.id_json, error);
+            encoded = json_error_response(request.id_json, error);
         } catch (const std::exception& error) {
             DbError wrapped(1105, "HY000", error.what());
-            std::cout << json_error_response(request.id_json, wrapped);
+            encoded = json_error_response(request.id_json, wrapped);
         }
-        std::cout.flush();
+        if (!write_json(encoded)) return;
     }
 }
 
@@ -1138,8 +1160,7 @@ int main(int argc, char** argv) {
     }
     std::optional<Txn> txn;
     if (config.protocol == "json") {
-        std::cout << "{\"type\":\"ready\"}\n";
-        std::cout.flush();
+        if (!write_json("{\"type\":\"ready\"}\n")) return 1;
         run_json_loop(database, txn, config.max_response_bytes);
         return 0;
     }
