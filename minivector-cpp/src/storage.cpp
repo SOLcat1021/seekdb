@@ -316,7 +316,7 @@ void encode_packed_vector(std::vector<uint8_t>& out, const std::vector<float>& v
 }
 
 void encode_op(std::vector<uint8_t>& out, const Schema& schema, const Op& op,
-               const std::array<uint8_t, 256>* codes) {
+               const std::array<uint8_t, 256>* codes, const uint8_t*& fixed) {
     append_u8(out, static_cast<uint8_t>(op.kind));
     append_i64(out, op.pk);
     if (op.kind == OpKind::Delete) {
@@ -328,7 +328,12 @@ void encode_op(std::vector<uint8_t>& out, const Schema& schema, const Op& op,
     for (size_t index = 0; index < schema.columns.size(); ++index) {
         const ColumnType& type = schema.columns[index].type;
         const Value& value = op.row->values[index];
-        if (codes && type.kind == TypeKind::Vector) {
+        if (fixed && type.kind == TypeKind::Vector) {
+            const size_t length = 3 * static_cast<size_t>(type.n);
+            append_u32(out, static_cast<uint32_t>(length));
+            out.insert(out.end(), fixed, fixed + length);
+            fixed += length;
+        } else if (codes && type.kind == TypeKind::Vector) {
             encode_packed_vector(out, value.v, *codes);
         } else {
             encode_value(out, type, value);
@@ -372,7 +377,7 @@ std::vector<Op> decode_payload(const Schema& schema, const uint8_t* data, size_t
                     const size_t length = reader.u32();
                     const auto* vector = reader.take(length);
                     const size_t dim = column.type.n;
-                    if (dim > 4096 || length < vector_block::packed_prefix(dim)) {
+                    if (dim > 4096 || (length != 3 * dim && length < vector_block::packed_prefix(dim))) {
                         fail_internal("storage corrupted: invalid vector block dimensions");
                     }
                     unpacked.resize(dim * sizeof(float));
@@ -391,6 +396,32 @@ std::vector<Op> decode_payload(const Schema& schema, const uint8_t* data, size_t
         fail_internal("storage corrupted: trailing bytes in record payload");
     }
     return ops;
+}
+
+std::vector<uint8_t> encode_fixed_batch(const Schema& schema, const std::vector<Op>& ops) {
+    static const bool enabled = std::getenv("MVD_DISABLE_FIXED_BLOCK") == nullptr;
+    static const char* blocks = std::getenv("MVD_VECTOR_BLOCK");
+    const auto column = schema.vector_col();
+    if (!enabled || (blocks && std::strcmp(blocks, "0") == 0) || !column || ops.size() < 16) return {};
+    const size_t dim = schema.columns[*column].type.n;
+    if (dim < 32 || dim > 4096 || ops.size() > kMaxRecordSize / (dim * 3)) return {};
+    std::vector<uint8_t> packed;
+    for (const Op& op : ops) {
+        if (op.kind == OpKind::Delete) continue;
+        if (!op.row || op.row->values.size() != schema.columns.size()) return {};
+        const auto& value = op.row->values[*column];
+        if (value.kind != Value::Kind::Vec || value.v.size() != dim) return {};
+        for (float component : value.v) {
+            int32_t code;
+            if (!vector_block::fixed_code(component, code)) return {};
+            const uint32_t bits = static_cast<uint32_t>(code);
+            packed.push_back(static_cast<uint8_t>(bits));
+            packed.push_back(static_cast<uint8_t>(bits >> 8));
+            packed.push_back(static_cast<uint8_t>(bits >> 16));
+        }
+        if (packed.size() == 3 * dim) packed.reserve(ops.size() * 3 * dim);
+    }
+    return packed;
 }
 
 std::optional<std::array<uint8_t, vector_block::dictionary_size>> choose_vector_dictionary(
@@ -621,17 +652,24 @@ std::vector<uint8_t> encode_segment_record(const Schema& schema, const std::vect
         capacity += encoded_op_size(schema, op);
     }
     std::array<uint8_t, 256> codes;
-    const auto dictionary = compress ? choose_vector_dictionary(schema, ops, codes) : std::nullopt;
+    const auto fixed_data = compress ? encode_fixed_batch(schema, ops) : std::vector<uint8_t>{};
+    const auto dictionary = compress && fixed_data.empty() ? choose_vector_dictionary(schema, ops, codes) : std::nullopt;
+    const bool packed = dictionary.has_value() || !fixed_data.empty();
     std::vector<uint8_t> record;
     record.reserve(capacity);
     append_u32(record, kRecordMagic);
-    append_u8(record, dictionary ? kRecordFlagVectorBlock : 0);
+    append_u8(record, packed ? kRecordFlagVectorBlock : 0);
     append_u32(record, 0);
     append_u32(record, 0);
     append_u32(record, static_cast<uint32_t>(ops.size()));
     if (dictionary) record.insert(record.end(), dictionary->begin(), dictionary->end());
+    const uint8_t* fixed = nullptr;
+    if (!fixed_data.empty()) {
+        record.insert(record.end(), vector_block::dictionary_size, uint8_t{0});
+        fixed = fixed_data.data();
+    }
     for (const Op& op : ops) {
-        encode_op(record, schema, op, dictionary ? &codes : nullptr);
+        encode_op(record, schema, op, dictionary ? &codes : nullptr, fixed);
     }
     size_t payload_length = record.size() - kHeaderLength;
     if (payload_length > kMaxRecordSize) {

@@ -4904,12 +4904,15 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                 if (dictionary) {
 #if defined(__x86_64__) || defined(__i386__)
                     if (packed_screen && use_avx && asc && dim % 16 == 0 &&
-                        packed_size == vector_block::packed_prefix(dim) && heap.size() == keep &&
+                        heap.size() == keep &&
                         bound.relative < 0.25) {
                         const double worst = heap.top().exact;
                         const double threshold = worst * worst;
                         const double cutoff = threshold + threshold * bound.relative + bound.absolute;
-                        if (vector_block::screen_dense({raw_vector, dictionary, packed_size}, query, dim, cutoff)) continue;
+                        const vector_block::View packed{raw_vector, dictionary, packed_size};
+                        if (packed_size == 3 * dim && vector_block::screen_fixed(packed, query, dim, cutoff)) continue;
+                        if (packed_size == vector_block::packed_prefix(dim) &&
+                            vector_block::screen_dense(packed, query, dim, cutoff)) continue;
                     }
 #endif
                     scratch.resize(dim * sizeof(float));
