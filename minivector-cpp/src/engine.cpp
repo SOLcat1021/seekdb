@@ -15,6 +15,7 @@
 #include <queue>
 #include <set>
 #include <sstream>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <thread>
 #include <tuple>
@@ -796,10 +797,6 @@ double l2_distance_raw(
     const float* query,
     size_t size) {
     return exact_scan::distance_raw(row, query, size);
-}
-
-double l2_distance_ptr(const float* a, const float* b, size_t size) {
-    return exact_scan::distance(a, b, size);
 }
 
 class RawPayloadReader {
@@ -2320,6 +2317,10 @@ bool Table::cache_covers_all() const {
     return cache.has_value() && cache->size() == entries.size();
 }
 
+void HotSet::SegmentUnmap::operator()(const uint8_t* data) const noexcept {
+    ::munmap(const_cast<uint8_t*>(data), length);
+}
+
 bool Table::ensure_hot() {
     if (hot.has_value()) {
         return true;
@@ -2375,18 +2376,28 @@ bool Table::ensure_hot() {
         hot = std::move(set);
         return true;
     }
-    // The decoded-row cache is intentionally capped well below the vector
-    // budget.  Build the columnar vector set directly from the segment when
-    // the full vectors fit, but the full rows do not.
+    // Keep the same admission limit while comparing the two hot layouts.
     if (entries.empty() ||
         entries.size() > cache_budget / std::max<size_t>(bytes_per_row, 1)) {
         return false;
     }
+    if (seg.len > 0 && seg.len <= std::numeric_limits<size_t>::max()) {
+        size_t length = static_cast<size_t>(seg.len);
+        void* mapped = ::mmap(nullptr, length, PROT_READ, MAP_SHARED, seg.fd, 0);
+        if (mapped != MAP_FAILED) {
+            set.mapped = decltype(set.mapped)(
+                static_cast<const uint8_t*>(mapped), HotSet::SegmentUnmap{length});
+        }
+    }
     set.pks.reserve(entries.size());
-    set.vectors.reserve(entries.size() * set.dim);
+    if (set.mapped) {
+        set.vector_offsets.reserve(entries.size());
+    } else {
+        set.vectors.reserve(entries.size() * set.dim);
+    }
     std::vector<int64_t> row_ints(schema.columns.size(), 0);
-    scan_segment_raw(
-        path,
+    const uint64_t scanned = scan_segment_raw_range(
+        path, 0, seg.len,
         [&](uint64_t offset, uint32_t, const uint8_t* payload, size_t size) {
             RawPayloadReader reader(payload, size);
             uint32_t op_count = reader.u32();
@@ -2438,16 +2449,27 @@ bool Table::ensure_hot() {
                         set.int_columns[index]->push_back(row_ints[index]);
                     }
                 }
-                size_t vector_offset = set.vectors.size();
-                set.vectors.resize(vector_offset + set.dim);
-                std::memcpy(
-                    set.vectors.data() + vector_offset,
-                    raw_vector,
-                    static_cast<size_t>(set.dim) * sizeof(float));
+                if (set.mapped) {
+                    set.vector_offsets.push_back(
+                        static_cast<size_t>(offset + kRawRecordHeaderSize + (raw_vector - payload)));
+                } else {
+                    size_t vector_offset = set.vectors.size();
+                    set.vectors.resize(vector_offset + set.dim);
+                    std::memcpy(set.vectors.data() + vector_offset, raw_vector, set.dim * sizeof(float));
+                }
             }
         });
+    if (scanned != seg.len || set.pks.size() != entries.size()) {
+        return false;
+    }
     if (set.pks.size() <= cache_budget / (bytes_per_row + set.dim)) {
-        try { set.quantized.build(set.vectors, set.dim); }
+        try {
+            if (set.mapped) {
+                set.quantized.build_mapped(set.mapped.get(), set.vector_offsets, set.dim);
+            } else {
+                set.quantized.build(set.vectors, set.dim);
+            }
+        }
         catch (const std::bad_alloc&) { /* optional accelerator */ }
     }
     hot = std::move(set);
@@ -3283,6 +3305,7 @@ void Table::abort_statement_batch() {
 }
 
 void Table::compact() {
+    hot.reset();
     ann.reset();
     std::string temporary = path + ".tmp";
     int fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -4575,13 +4598,12 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                         : std::numeric_limits<double>::infinity();
                 };
                 scan_hot(begin, end, worst, [&](size_t index) {
-                    const float* row = hot.vectors.data() + index * hot.dim;
-                    float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
-                                             query.data(), hot.dim, use_avx);
+                    const uint8_t* row = hot.vector_bytes(index);
+                    float approx = l2_sq_raw(row, query.data(), hot.dim, use_avx);
                     if (heap.size() == keep &&
                         bound.rejects(approx, heap.top().distance, asc)) return;
                     HotCandidate candidate{
-                        l2_distance_ptr(row, query.data(), hot.dim), hot.pks[index], index};
+                        l2_distance_raw(row, query.data(), hot.dim), hot.pks[index], index};
                     if (heap.size() < keep) {
                         heap.push(candidate);
                     } else if (HotCompare{asc}(candidate, heap.top())) {
@@ -4646,13 +4668,12 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                     : std::numeric_limits<double>::infinity();
             };
             scan_hot(0, scan_count, worst, [&](size_t index) {
-                const float* row = hot.vectors.data() + index * hot.dim;
-                float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
-                                         query.data(), hot.dim, use_avx);
+                const uint8_t* row = hot.vector_bytes(index);
+                float approx = l2_sq_raw(row, query.data(), hot.dim, use_avx);
                 if (candidates.size() == keep &&
                     bound.rejects(approx, candidates.front().distance, asc)) return;
                 HotCandidate candidate{
-                    l2_distance_ptr(row, query.data(), hot.dim), hot.pks[index], index};
+                    l2_distance_raw(row, query.data(), hot.dim), hot.pks[index], index};
                 if (candidates.size() < keep) {
                     candidates.push_back(candidate);
                     std::push_heap(candidates.begin(), candidates.end(), compare);
@@ -4708,13 +4729,11 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                 values.reserve(projections.size());
                 for (const Projection& projection : projections) {
                     if (projection.kind == Projection::Kind::Distance) {
-                        const float* row =
-                            hot.vectors.data() + item.index * hot.dim;
                         values.push_back(OutputValue::floating(
                             projection.query == *distance_target->query
                                 ? item.distance
-                                : l2_distance_ptr(
-                                      row, projection.query.data(), hot.dim)));
+                                : l2_distance_raw(hot.vector_bytes(item.index),
+                                                  projection.query.data(), hot.dim)));
                     } else {
                         values.push_back(OutputValue::integer(
                             (*hot.int_columns[projection.column])[item.index]));

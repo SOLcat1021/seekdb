@@ -74,14 +74,28 @@ struct HotStringRowCache {
 };
 
 struct HotSet {
+    struct SegmentUnmap {
+        size_t length;
+        void operator()(const uint8_t* data) const noexcept;
+    };
+
     quantized_scan::Cache quantized;
     HotStringRowCache string_rows;
     size_t dim = 0;
     size_t vector_column = 0;
     std::vector<int64_t> pks;
     std::vector<float> vectors;
+    std::unique_ptr<const uint8_t, SegmentUnmap> mapped{nullptr, SegmentUnmap{0}};
+    std::vector<size_t> vector_offsets;
     std::vector<std::optional<std::vector<int64_t>>> int_columns;
     std::vector<std::optional<std::vector<std::string>>> str_columns;
+
+    const uint8_t* vector_bytes(size_t row) const {
+        if (mapped) {
+            return mapped.get() + vector_offsets[row];
+        }
+        return reinterpret_cast<const uint8_t*>(vectors.data() + row * dim);
+    }
 };
 
 struct AnnIndex {
