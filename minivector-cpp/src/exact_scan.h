@@ -5,7 +5,11 @@
 #include <cstdint>
 #include <cstring>
 #include <array>
+#include <cstdlib>
 #include <limits>
+#if defined(__x86_64__) || defined(__i386__)
+#include <immintrin.h>
+#endif
 
 // Partner contribution on top of the team's v25 engine. Screening uses direct
 // differences, never norm(a)+norm(b)-2*dot(a,b). Only a conservative bound may
@@ -128,15 +132,7 @@ double exact_distance(const Load& load, const float* b, size_t n) {
 }
 
 template <class Load>
-double distance(const Load& load, const float* b, size_t n) {
-    long double sum = 0, correction = 0;
-    for (size_t i = 0; i < n; ++i) {
-        long double d = static_cast<long double>(load(i)) - b[i];
-        long double term = d * d, next = sum + term;
-        correction += sum >= term ? (sum - next) + term : (term - next) + sum;
-        sum = next;
-    }
-    sum += correction;
+double rounded_distance(long double sum, const Load& load, const float* b, size_t n) {
     if (!std::isfinite(sum)) return static_cast<double>(std::sqrt(sum));
     if (sum == 0) return 0;
     double value = static_cast<double>(std::sqrt(sum));
@@ -154,6 +150,77 @@ double distance(const Load& load, const float* b, size_t n) {
     }
     return exact_distance(load, b, n);
 }
+
+template <class Load>
+double distance(const Load& load, const float* b, size_t n) {
+    long double sum = 0, correction = 0;
+    for (size_t i = 0; i < n; ++i) {
+        long double d = static_cast<long double>(load(i)) - b[i];
+        long double term = d * d, next = sum + term;
+        correction += sum >= term ? (sum - next) + term : (term - next) + sum;
+        sum = next;
+    }
+    return rounded_distance(sum + correction, load, b, n);
+}
+
+#if defined(__x86_64__) || defined(__i386__)
+__attribute__((target("avx2,fma"))) inline long double compensated_square_avx2(
+    const uint8_t* a, const float* b, size_t n) {
+    __m256d sum = _mm256_setzero_pd();
+    __m256d correction = sum;
+    const __m256d sign = _mm256_set1_pd(-0.0);
+    for (size_t i = 0; i < n; i += 4) {
+        __m128 loaded;
+        std::memcpy(&loaded, a + i * sizeof(float), sizeof(loaded));
+        const __m256d x = _mm256_cvtps_pd(loaded);
+        const __m256d y = _mm256_xor_pd(_mm256_cvtps_pd(_mm_loadu_ps(b + i)), sign);
+        const __m256d d = _mm256_add_pd(x, y);
+        const __m256d swap = _mm256_cmp_pd(_mm256_andnot_pd(sign, x), _mm256_andnot_pd(sign, y), _CMP_LT_OQ);
+        const __m256d high = _mm256_blendv_pd(x, y, swap);
+        const __m256d low = _mm256_blendv_pd(y, x, swap);
+        // FastTwoSum gives the residual of x+y. FMA recovers the product
+        // residual. The omitted residual squared is at most u^2*d^2.
+        const __m256d residual = _mm256_sub_pd(low, _mm256_sub_pd(d, high));
+        const __m256d square = _mm256_mul_pd(d, d);
+        const __m256d square_error = _mm256_fmadd_pd(
+            _mm256_add_pd(d, d), residual, _mm256_fmsub_pd(d, d, square));
+        const __m256d next = _mm256_add_pd(sum, square);
+        const __m256d larger = _mm256_max_pd(sum, square);
+        const __m256d smaller = _mm256_min_pd(sum, square);
+        const __m256d sum_error = _mm256_sub_pd(smaller, _mm256_sub_pd(next, larger));
+        correction = _mm256_add_pd(correction, _mm256_add_pd(square_error, sum_error));
+        sum = next;
+    }
+    double sums[4], errors[4];
+    _mm256_storeu_pd(sums, sum);
+    _mm256_storeu_pd(errors, correction);
+    long double total = 0, error = 0;
+    for (size_t i = 0; i < 4; ++i) {
+        total += sums[i];
+        error += errors[i];
+    }
+    // At n <= 4096, summing binary64 residuals incurs O(n^2*u^2)
+    // relative error. The final long-double reduction and this error fit
+    // within rounded_distance's 32*epsilon interval on x86 extended precision.
+    return total + error;
+}
+#endif
+
+inline double distance_bytes(const uint8_t* a, const float* b, size_t n) {
+    const auto load = [a](size_t i) {
+        float value;
+        std::memcpy(&value, a + i * sizeof(float), sizeof(value));
+        return value;
+    };
+#if defined(__x86_64__) || defined(__i386__)
+    static const bool simd = std::getenv("MVD_DISABLE_EXACT_SIMD") == nullptr &&
+        __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
+    if (simd && std::numeric_limits<long double>::digits == 64 && n >= 16 && n <= 4096 && n % 4 == 0) {
+        return rounded_distance(compensated_square_avx2(a, b, n), load, b, n);
+    }
+#endif
+    return distance(load, b, n);
+}
 }  // namespace detail
 
 inline double distance(const float* a, const float* b, size_t n) {
@@ -161,11 +228,7 @@ inline double distance(const float* a, const float* b, size_t n) {
 }
 
 inline double distance_raw(const uint8_t* a, const float* b, size_t n) {
-    return detail::distance([a](size_t i) {
-        float value;
-        std::memcpy(&value, a + i * sizeof(float), sizeof(value));
-        return value;
-    }, b, n);
+    return detail::distance_bytes(a, b, n);
 }
 
 struct Bound {
