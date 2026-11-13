@@ -185,8 +185,9 @@ struct Cache {
         codes = std::move(encoded);
     }
 
-    void build_mapped(const uint8_t* bytes, const std::vector<size_t>& offsets, size_t dimension) {
-        if (dimension == 0 || dimension > 4096 || offsets.empty()) return;
+    template <typename ReadRow>
+    void build_mapped(size_t rows, size_t dimension, const ReadRow& read_row) {
+        if (dimension == 0 || dimension > 4096 || rows == 0) return;
         // Segment fields can be unaligned. Reuse one row of aligned scratch
         // space for the two passes, with the same scale and rounding as build().
         std::vector<float> row(dimension);
@@ -195,8 +196,8 @@ struct Cache {
 #if defined(__x86_64__) || defined(__i386__)
         const bool use_avx2 = __builtin_cpu_supports("avx2");
 #endif
-        for (size_t offset : offsets) {
-            std::memcpy(row.data(), bytes + offset, row_bytes);
+        for (size_t index = 0; index < rows; ++index) {
+            std::memcpy(row.data(), read_row(index), row_bytes);
 #if defined(__x86_64__) || defined(__i386__)
             const float peak = use_avx2 ? maximum_abs_avx2(row.data(), dimension)
                                        : maximum_abs_scalar(row.data(), dimension);
@@ -207,10 +208,10 @@ struct Cache {
         }
         if (!std::isfinite(maximum)) return;
         const double step = quantization_step(maximum);
-        std::vector<int8_t> encoded(offsets.size() * dimension);
+        std::vector<int8_t> encoded(rows * dimension);
         int8_t* destination = encoded.data();
-        for (size_t offset : offsets) {
-            std::memcpy(row.data(), bytes + offset, row_bytes);
+        for (size_t index = 0; index < rows; ++index) {
+            std::memcpy(row.data(), read_row(index), row_bytes);
             size_t i = 0;
 #if defined(__x86_64__) || defined(__i386__)
             if (use_avx2) i = encode_avx2(row.data(), destination, dimension, step);

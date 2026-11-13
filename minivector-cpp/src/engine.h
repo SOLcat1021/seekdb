@@ -4,6 +4,7 @@
 #include "quantized_scan.h"
 #include "storage.h"
 #include "util.h"
+#include "vector_block.h"
 
 #include <array>
 #include <functional>
@@ -87,12 +88,25 @@ struct HotSet {
     std::vector<float> vectors;
     std::unique_ptr<const uint8_t, SegmentUnmap> mapped{nullptr, SegmentUnmap{0}};
     std::vector<size_t> vector_offsets;
+    struct PackedLocation {
+        size_t dictionary_offset = 0;
+        size_t size = 0;
+    };
+    std::vector<PackedLocation> packed_vectors;
     std::vector<std::optional<std::vector<int64_t>>> int_columns;
     std::vector<std::optional<std::vector<std::string>>> str_columns;
 
-    const uint8_t* vector_bytes(size_t row) const {
+    const uint8_t* vector_bytes(size_t row, std::vector<uint8_t>& scratch) const {
         if (mapped) {
-            return mapped.get() + vector_offsets[row];
+            const uint8_t* data = mapped.get() + vector_offsets[row];
+            if (!packed_vectors.empty() && packed_vectors[row].size != 0) {
+                const auto& packed = packed_vectors[row];
+                scratch.resize(dim * sizeof(float));
+                vector_block::decode({data, mapped.get() + packed.dictionary_offset, packed.size},
+                                     dim, scratch.data());
+                return scratch.data();
+            }
+            return data;
         }
         return reinterpret_cast<const uint8_t*>(vectors.data() + row * dim);
     }
