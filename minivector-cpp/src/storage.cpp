@@ -1,7 +1,5 @@
 #include "storage.h"
-#include "vector_block.h"
 
-#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdlib>
@@ -285,38 +283,7 @@ Value decode_value(Reader& reader, const ColumnType& type) {
     fail_internal("storage corrupted: unknown column type");
 }
 
-void encode_packed_vector(std::vector<uint8_t>& out, const std::vector<float>& values,
-                          const std::array<uint8_t, 256>& codes) {
-    const size_t dim = values.size();
-    const size_t prefix = vector_block::packed_prefix(dim);
-    const size_t size_offset = out.size();
-    out.resize(out.size() + 4 + prefix + dim);
-    uint8_t* start = out.data() + size_offset + 4;
-    uint8_t* literals = start + prefix;
-    for (size_t i = 0; i < dim; i += 2) {
-        uint8_t pair = 0;
-        const size_t count = dim - i >= 2 ? 2 : 1;
-        for (size_t lane = 0; lane < count; ++lane) {
-            uint32_t bits;
-            std::memcpy(&bits, &values[i + lane], sizeof(bits));
-            auto* bytes = start + 3 * (i + lane);
-            bytes[0] = static_cast<uint8_t>(bits);
-            bytes[1] = static_cast<uint8_t>(bits >> 8);
-            bytes[2] = static_cast<uint8_t>(bits >> 16);
-            const uint8_t high = static_cast<uint8_t>(bits >> 24);
-            const uint8_t code = codes[high];
-            pair |= static_cast<uint8_t>(code << (4 * lane));
-            if (code == vector_block::escape) *literals++ = high;
-        }
-        start[3 * dim + i / 2] = pair;
-    }
-    const size_t size = static_cast<size_t>(literals - start);
-    store_u32(out.data() + size_offset, static_cast<uint32_t>(size));
-    out.resize(size_offset + 4 + size);
-}
-
-void encode_op(std::vector<uint8_t>& out, const Schema& schema, const Op& op,
-               const std::array<uint8_t, 256>* codes, const uint8_t*& fixed) {
+void encode_op(std::vector<uint8_t>& out, const Schema& schema, const Op& op) {
     append_u8(out, static_cast<uint8_t>(op.kind));
     append_i64(out, op.pk);
     if (op.kind == OpKind::Delete) {
@@ -326,30 +293,16 @@ void encode_op(std::vector<uint8_t>& out, const Schema& schema, const Op& op,
         fail_internal("storage corrupted: row does not match schema");
     }
     for (size_t index = 0; index < schema.columns.size(); ++index) {
-        const ColumnType& type = schema.columns[index].type;
-        const Value& value = op.row->values[index];
-        if (fixed && type.kind == TypeKind::Vector) {
-            const size_t length = 3 * static_cast<size_t>(type.n);
-            append_u32(out, static_cast<uint32_t>(length));
-            out.insert(out.end(), fixed, fixed + length);
-            fixed += length;
-        } else if (codes && type.kind == TypeKind::Vector) {
-            encode_packed_vector(out, value.v, *codes);
-        } else {
-            encode_value(out, type, value);
-        }
+        encode_value(out, schema.columns[index].type, op.row->values[index]);
     }
 }
 
-std::vector<Op> decode_payload(const Schema& schema, const uint8_t* data, size_t size, uint8_t flags) {
+std::vector<Op> decode_payload(const Schema& schema, const uint8_t* data, size_t size) {
     Reader reader{data, size};
     uint32_t count = reader.u32();
     if (count > 100000000u) {
         fail_internal("storage corrupted: op count out of range");
     }
-    const uint8_t* dictionary = flags & kRecordFlagVectorBlock
-        ? reader.take(vector_block::dictionary_size) : nullptr;
-    std::vector<uint8_t> unpacked;
     std::vector<Op> ops;
     ops.reserve(count);
     for (uint32_t index = 0; index < count; ++index) {
@@ -373,20 +326,7 @@ std::vector<Op> decode_payload(const Schema& schema, const uint8_t* data, size_t
             Row row;
             row.values.reserve(schema.columns.size());
             for (const Column& column : schema.columns) {
-                if (dictionary && column.type.kind == TypeKind::Vector) {
-                    const size_t length = reader.u32();
-                    const auto* vector = reader.take(length);
-                    const size_t dim = column.type.n;
-                    if (dim > 4096 || (length != 3 * dim && length < vector_block::packed_prefix(dim))) {
-                        fail_internal("storage corrupted: invalid vector block dimensions");
-                    }
-                    unpacked.resize(dim * sizeof(float));
-                    vector_block::decode({vector, dictionary, length}, dim, unpacked.data());
-                    Reader decoded{unpacked.data(), unpacked.size()};
-                    row.values.push_back(decode_value(decoded, column.type));
-                } else {
-                    row.values.push_back(decode_value(reader, column.type));
-                }
+                row.values.push_back(decode_value(reader, column.type));
             }
             op.row = std::move(row);
         }
@@ -398,82 +338,11 @@ std::vector<Op> decode_payload(const Schema& schema, const uint8_t* data, size_t
     return ops;
 }
 
-std::vector<uint8_t> encode_fixed_batch(const Schema& schema, const std::vector<Op>& ops) {
-    static const bool enabled = std::getenv("MVD_DISABLE_FIXED_BLOCK") == nullptr;
-    static const char* blocks = std::getenv("MVD_VECTOR_BLOCK");
-    const auto column = schema.vector_col();
-    if (!enabled || (blocks && std::strcmp(blocks, "0") == 0) || !column || ops.size() < 16) return {};
-    const size_t dim = schema.columns[*column].type.n;
-    if (dim < 32 || dim > 4096 || ops.size() > kMaxRecordSize / (dim * 3)) return {};
-    std::vector<uint8_t> packed;
-    for (const Op& op : ops) {
-        if (op.kind == OpKind::Delete) continue;
-        if (!op.row || op.row->values.size() != schema.columns.size()) return {};
-        const auto& value = op.row->values[*column];
-        if (value.kind != Value::Kind::Vec || value.v.size() != dim) return {};
-        for (float component : value.v) {
-            int32_t code;
-            if (!vector_block::fixed_code(component, code)) return {};
-            const uint32_t bits = static_cast<uint32_t>(code);
-            packed.push_back(static_cast<uint8_t>(bits));
-            packed.push_back(static_cast<uint8_t>(bits >> 8));
-            packed.push_back(static_cast<uint8_t>(bits >> 16));
-        }
-        if (packed.size() == 3 * dim) packed.reserve(ops.size() * 3 * dim);
-    }
-    return packed;
-}
-
-std::optional<std::array<uint8_t, vector_block::dictionary_size>> choose_vector_dictionary(
-    const Schema& schema, const std::vector<Op>& ops, std::array<uint8_t, 256>& codes) {
-    static const char* config = std::getenv("MVD_VECTOR_BLOCK");
-    if (config && std::strcmp(config, "0") == 0) return std::nullopt;
-    const auto column = schema.vector_col();
-    if (!column || ops.size() < 16) return std::nullopt;
-    const size_t dim = schema.columns[*column].type.n;
-    if (dim < 32 || dim > 4096) return std::nullopt;
-    std::array<size_t, 256> histogram{};
-    size_t rows = 0;
-    for (const Op& op : ops) {
-        if (op.kind == OpKind::Delete) continue;
-        if (!op.row || op.row->values.size() != schema.columns.size()) return std::nullopt;
-        const Value& value = op.row->values[*column];
-        if (value.kind != Value::Kind::Vec || value.v.size() != dim) return std::nullopt;
-        for (float component : value.v) {
-            uint32_t bits;
-            std::memcpy(&bits, &component, sizeof(bits));
-            ++histogram[bits >> 24];
-        }
-        ++rows;
-    }
-    std::array<uint8_t, 256> ranked;
-    for (size_t i = 0; i < ranked.size(); ++i) ranked[i] = static_cast<uint8_t>(i);
-    std::array<uint8_t, vector_block::dictionary_size> dictionary;
-    std::partial_sort_copy(ranked.begin(), ranked.end(), dictionary.begin(), dictionary.end(),
-        [&](uint8_t a, uint8_t b) {
-            return histogram[a] == histogram[b] ? a < b : histogram[a] > histogram[b];
-        });
-    size_t escaped = rows * dim;
-    codes.fill(vector_block::escape);
-    for (size_t i = 0; i < dictionary.size(); ++i) {
-        codes[dictionary[i]] = static_cast<uint8_t>(i);
-        escaped -= histogram[dictionary[i]];
-    }
-    const size_t packed = dictionary.size() + rows * (4 + vector_block::packed_prefix(dim)) + escaped;
-    // Require at least a 5% reduction in the vector fields.
-    if (packed >= rows * dim * 4 * 95 / 100) return std::nullopt;
-    return dictionary;
-}
-
-std::vector<uint8_t> encode_segment_record(const Schema& schema, const std::vector<Op>& ops,
-                                           bool compress);
-
 }  // namespace
 
 Segment::Segment(Segment&& other) noexcept
     : fd(other.fd), path(std::move(other.path)), len(other.len),
-      reserved_end(other.reserved_end), preallocation_disabled(other.preallocation_disabled),
-      has_vector_blocks(other.has_vector_blocks) {
+      reserved_end(other.reserved_end), preallocation_disabled(other.preallocation_disabled) {
     other.fd = -1;
     other.len = 0;
 }
@@ -488,7 +357,6 @@ Segment& Segment::operator=(Segment&& other) noexcept {
         len = other.len;
         reserved_end = other.reserved_end;
         preallocation_disabled = other.preallocation_disabled;
-        has_vector_blocks = other.has_vector_blocks;
         other.fd = -1;
         other.len = 0;
     }
@@ -592,11 +460,11 @@ std::pair<uint64_t, uint32_t> Segment::append(
     if (ops.empty() && flags == 0) {
         return {len, 0};
     }
-    std::vector<uint8_t> record = encode_segment_record(schema, ops, true);
+    std::vector<uint8_t> record = encode_record(schema, ops);
     if (record.size() < kHeaderLength) {
         fail_internal("commit record is shorter than its header");
     }
-    record[4] |= flags;
+    record[4] = flags;
     uint64_t offset = len;
     reserve_append(record.size());
     crash_point("wal_before_write");
@@ -614,7 +482,6 @@ std::pair<uint64_t, uint32_t> Segment::append(
     }
     crash_point("wal_after_fsync");
     len += record.size();
-    has_vector_blocks |= (record[4] & kRecordFlagVectorBlock) != 0;
     return {offset, static_cast<uint32_t>(record.size())};
 }
 
@@ -641,9 +508,7 @@ std::vector<Op> Segment::read_record(
     return decode_record(schema, buffer.data(), buffer.size());
 }
 
-namespace {
-std::vector<uint8_t> encode_segment_record(const Schema& schema, const std::vector<Op>& ops,
-                                           bool compress) {
+std::vector<uint8_t> encode_record(const Schema& schema, const std::vector<Op>& ops) {
     if (ops.size() > std::numeric_limits<uint32_t>::max()) {
         fail_internal("commit record has too many operations");
     }
@@ -651,25 +516,15 @@ std::vector<uint8_t> encode_segment_record(const Schema& schema, const std::vect
     for (const Op& op : ops) {
         capacity += encoded_op_size(schema, op);
     }
-    std::array<uint8_t, 256> codes;
-    const auto fixed_data = compress ? encode_fixed_batch(schema, ops) : std::vector<uint8_t>{};
-    const auto dictionary = compress && fixed_data.empty() ? choose_vector_dictionary(schema, ops, codes) : std::nullopt;
-    const bool packed = dictionary.has_value() || !fixed_data.empty();
     std::vector<uint8_t> record;
     record.reserve(capacity);
     append_u32(record, kRecordMagic);
-    append_u8(record, packed ? kRecordFlagVectorBlock : 0);
+    append_u8(record, 0);
     append_u32(record, 0);
     append_u32(record, 0);
     append_u32(record, static_cast<uint32_t>(ops.size()));
-    if (dictionary) record.insert(record.end(), dictionary->begin(), dictionary->end());
-    const uint8_t* fixed = nullptr;
-    if (!fixed_data.empty()) {
-        record.insert(record.end(), vector_block::dictionary_size, uint8_t{0});
-        fixed = fixed_data.data();
-    }
     for (const Op& op : ops) {
-        encode_op(record, schema, op, dictionary ? &codes : nullptr, fixed);
+        encode_op(record, schema, op);
     }
     size_t payload_length = record.size() - kHeaderLength;
     if (payload_length > kMaxRecordSize) {
@@ -681,11 +536,6 @@ std::vector<uint8_t> encode_segment_record(const Schema& schema, const std::vect
     store_u32(record.data() + 9, checksum);
     return record;
 }
-}  // namespace
-
-std::vector<uint8_t> encode_record(const Schema& schema, const std::vector<Op>& ops) {
-    return encode_segment_record(schema, ops, false);
-}
 
 std::vector<Op> decode_record(const Schema& schema, const uint8_t* data, size_t size) {
     if (size < kHeaderLength) {
@@ -696,7 +546,7 @@ std::vector<Op> decode_record(const Schema& schema, const uint8_t* data, size_t 
     if (magic != kRecordMagic) {
         fail_internal("storage corrupted: bad record magic");
     }
-    const uint8_t flags = reader.u8();
+    reader.u8();
     uint32_t payload_length = reader.u32();
     uint32_t stored_crc = reader.u32();
     if (kHeaderLength + payload_length != size) {
@@ -706,7 +556,7 @@ std::vector<Op> decode_record(const Schema& schema, const uint8_t* data, size_t 
     if (crc32(payload, payload_length) != stored_crc) {
         fail_internal("storage corrupted: record checksum mismatch");
     }
-    return decode_payload(schema, payload, payload_length, flags);
+    return decode_payload(schema, payload, payload_length);
 }
 
 uint64_t scan_segment(
@@ -755,9 +605,15 @@ uint64_t scan_segment(
         if (magic != kRecordMagic) {
             break;
         }
-        const uint8_t flags = reader.u8();
+        reader.u8();
         uint32_t payload_length = reader.u32();
         uint32_t stored_crc = reader.u32();
+        uint8_t flags = 0;
+        {
+            Reader header_reader{header, kHeaderLength};
+            header_reader.u32();
+            flags = header_reader.u8();
+        }
         if (payload_length > kMaxRecordSize) {
             break;
         }
@@ -788,7 +644,7 @@ uint64_t scan_segment(
         if (crc32(payload) != stored_crc) {
             break;
         }
-        std::vector<Op> ops = decode_payload(schema, payload.data(), payload.size(), flags);
+        std::vector<Op> ops = decode_payload(schema, payload.data(), payload.size());
         uint32_t record_length = static_cast<uint32_t>(kHeaderLength + payload_length);
         on_record(offset, record_length, flags, std::move(ops));
         offset += record_length;
@@ -801,7 +657,7 @@ uint64_t scan_segment_raw_range(
     const std::string& path,
     uint64_t start,
     uint64_t end,
-    const std::function<void(uint64_t, uint32_t, uint8_t, const uint8_t*, size_t)>& on_record) {
+    const std::function<void(uint64_t, uint32_t, const uint8_t*, size_t)>& on_record) {
     int fd = ::open(path.c_str(), O_RDONLY);
     if (fd < 0) {
         if (errno == ENOENT) {
@@ -877,7 +733,7 @@ uint64_t scan_segment_raw_range(
         if (reader.u32() != kRecordMagic) {
             break;
         }
-        const uint8_t flags = reader.u8();
+        reader.u8();
         uint32_t payload_length = reader.u32();
         if (payload_length > kMaxRecordSize ||
             offset + kHeaderLength + payload_length > end) {
@@ -890,7 +746,6 @@ uint64_t scan_segment_raw_range(
         on_record(
             offset,
             static_cast<uint32_t>(record_length),
-            flags,
             window.data() + window_pos + kHeaderLength,
             payload_length);
         window_pos += record_length;
@@ -902,7 +757,7 @@ uint64_t scan_segment_raw_range(
 
 uint64_t scan_segment_raw(
     const std::string& path,
-    const std::function<void(uint64_t, uint32_t, uint8_t, const uint8_t*, size_t)>& on_record) {
+    const std::function<void(uint64_t, uint32_t, const uint8_t*, size_t)>& on_record) {
     return scan_segment_raw_range(
         path, 0, std::numeric_limits<uint64_t>::max(), on_record);
 }

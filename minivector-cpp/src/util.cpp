@@ -143,52 +143,6 @@ float f64_to_f32(double value, const std::string& column, size_t row_no) {
     return static_cast<float>(value);
 }
 
-namespace {
-
-std::from_chars_result parse_short_fixed(const char* first, const char* last, double& value) {
-    const bool negative = *first == '-';
-    const char* cursor = first + negative;
-    if (last - cursor >= 8 && (last - cursor == 8 || cursor[8] == ',') &&
-        cursor[0] >= '0' && cursor[0] <= '9' && cursor[1] == '.') {
-        uint32_t digits = static_cast<unsigned>(cursor[0] - '0');
-        for (size_t i = 2; i < 8; ++i) {
-            const unsigned digit = static_cast<unsigned char>(cursor[i]) - unsigned('0');
-            if (digit > 9) return std::from_chars(first, last, value, std::chars_format::general);
-            digits = digits * 10 + digit;
-        }
-        value = static_cast<double>(digits) / 1000000.0;
-        if (negative) value = -value;
-        return {cursor + 8, {}};
-    }
-    const char* stop = cursor + std::min<ptrdiff_t>(9, last - cursor);
-    uint32_t digits = 0, divisor = 1;
-    unsigned count = 0;
-    bool fraction = false;
-    for (; cursor != stop; ++cursor) {
-        const unsigned digit = static_cast<unsigned char>(*cursor) - unsigned('0');
-        if (digit <= 9) {
-            if (count == 8) break;
-            digits = digits * 10 + digit;
-            ++count;
-            if (fraction) divisor *= 10;
-        } else if (*cursor == '.' && !fraction) {
-            fraction = true;
-        } else {
-            break;
-        }
-    }
-    if (count && (cursor == last || *cursor == ',')) {
-        // Both operands are exact binary64 integers. The division preserves
-        // the existing binary64 rounding step before conversion to float32.
-        const double magnitude = static_cast<double>(digits) / divisor;
-        value = negative ? -magnitude : magnitude;
-        return {cursor, {}};
-    }
-    return std::from_chars(first, last, value, std::chars_format::general);
-}
-
-} // namespace
-
 std::vector<float> parse_vector_literal(
     const std::string& text,
     uint32_t dim,
@@ -244,9 +198,8 @@ std::vector<float> parse_vector_literal(
                 }
             }
             double value = 0.0;
-            static const bool use_short_fixed = std::getenv("MVD_DISABLE_SHORT_FIXED") == nullptr;
-            auto parsed = use_short_fixed ? parse_short_fixed(cursor, limit, value)
-                : std::from_chars(cursor, limit, value, std::chars_format::general);
+            auto parsed = std::from_chars(
+                cursor, limit, value, std::chars_format::general);
             if (parsed.ec != std::errc() || parsed.ptr == cursor) {
                 std::string piece(
                     token_begin, static_cast<size_t>(limit - token_begin));

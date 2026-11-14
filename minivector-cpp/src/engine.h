@@ -4,7 +4,6 @@
 #include "quantized_scan.h"
 #include "storage.h"
 #include "util.h"
-#include "vector_block.h"
 
 #include <array>
 #include <functional>
@@ -75,55 +74,14 @@ struct HotStringRowCache {
 };
 
 struct HotSet {
-    struct SegmentUnmap {
-        size_t length;
-        void operator()(const uint8_t* data) const noexcept;
-    };
-
     quantized_scan::Cache quantized;
     HotStringRowCache string_rows;
     size_t dim = 0;
     size_t vector_column = 0;
     std::vector<int64_t> pks;
     std::vector<float> vectors;
-    std::unique_ptr<const uint8_t, SegmentUnmap> mapped{nullptr, SegmentUnmap{0}};
-    std::vector<size_t> vector_offsets;
-    struct PackedLocation {
-        size_t dictionary_offset = 0;
-        size_t size = 0;
-    };
-    std::vector<PackedLocation> packed_vectors;
     std::vector<std::optional<std::vector<int64_t>>> int_columns;
     std::vector<std::optional<std::vector<std::string>>> str_columns;
-    std::vector<std::vector<uint32_t>> string_offsets;
-
-    bool has_string_column(size_t column) const {
-        return str_columns[column].has_value() ||
-            (!string_offsets.empty() && !string_offsets[column].empty());
-    }
-
-    std::string_view string_at(size_t column, size_t row) const {
-        if (str_columns[column]) return (*str_columns[column])[row];
-        const uint8_t* data = mapped.get() + string_offsets[column][row];
-        const uint32_t length = uint32_t(data[0]) | (uint32_t(data[1]) << 8) |
-            (uint32_t(data[2]) << 16) | (uint32_t(data[3]) << 24);
-        return {reinterpret_cast<const char*>(data + sizeof(length)), length};
-    }
-
-    const uint8_t* vector_bytes(size_t row, std::vector<uint8_t>& scratch) const {
-        if (mapped) {
-            const uint8_t* data = mapped.get() + vector_offsets[row];
-            if (!packed_vectors.empty() && packed_vectors[row].size != 0) {
-                const auto& packed = packed_vectors[row];
-                scratch.resize(dim * sizeof(float));
-                vector_block::decode({data, mapped.get() + packed.dictionary_offset, packed.size},
-                                     dim, scratch.data());
-                return scratch.data();
-            }
-            return data;
-        }
-        return reinterpret_cast<const uint8_t*>(vectors.data() + row * dim);
-    }
 };
 
 struct AnnIndex {

@@ -12,7 +12,6 @@ enum class OpKind : uint8_t { Insert = 0, Update = 1, Delete = 2 };
 
 constexpr uint8_t kRecordFlagChunk = 1;
 constexpr uint8_t kRecordFlagCommit = 2;
-constexpr uint8_t kRecordFlagVectorBlock = 4;
 
 struct Op {
     OpKind kind;
@@ -26,7 +25,6 @@ struct Segment {
     uint64_t len = 0;
     uint64_t reserved_end = 0;
     bool preallocation_disabled = false;
-    bool has_vector_blocks = false;
 
     Segment() = default;
     Segment(const Segment&) = delete;
@@ -60,13 +58,13 @@ uint64_t scan_segment(
 // every record up to the committed length.
 uint64_t scan_segment_raw(
     const std::string& path,
-    const std::function<void(uint64_t, uint32_t, uint8_t, const uint8_t*, size_t)>& on_record);
+    const std::function<void(uint64_t, uint32_t, const uint8_t*, size_t)>& on_record);
 
 uint64_t scan_segment_raw_range(
     const std::string& path,
     uint64_t start,
     uint64_t end,
-    const std::function<void(uint64_t, uint32_t, uint8_t, const uint8_t*, size_t)>& on_record);
+    const std::function<void(uint64_t, uint32_t, const uint8_t*, size_t)>& on_record);
 
 void truncate_segment(const std::string& path, uint64_t valid_len);
 

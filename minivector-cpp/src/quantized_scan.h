@@ -151,15 +151,6 @@ struct Cache {
     size_t dim = 0;
     double scale = 0;
     std::vector<int8_t> codes;
-
-    static double quantization_step(double maximum) {
-        int exponent = 0;
-        std::frexp(maximum, &exponent);
-        double step = maximum == 0 ? 1.0 : std::ldexp(1.0, exponent - 7);
-        if (maximum > 127.0 * step) step *= 2;
-        return step;
-    }
-
     void build(const std::vector<float>& values, size_t dimension, bool allow_avx2 = true) {
         if (dimension == 0 || dimension > 4096 || values.empty() ||
             values.size() % dimension) return;
@@ -172,7 +163,10 @@ struct Cache {
         const double maximum = maximum_abs_scalar(values.data(), values.size());
 #endif
         if (!std::isfinite(maximum)) return;
-        const double step = quantization_step(maximum);
+        int exponent = 0;
+        std::frexp(maximum, &exponent);
+        double step = maximum == 0 ? 1.0 : std::ldexp(1.0, exponent-7);
+        if (maximum > 127.0 * step) step *= 2;
         std::vector<int8_t> encoded(values.size());
         size_t i = 0;
 #if defined(__x86_64__) || defined(__i386__)
@@ -180,47 +174,6 @@ struct Cache {
 #endif
         for (; i < values.size(); ++i)
             encoded[i] = int8_t(std::round(double(values[i]) / step));
-        dim = dimension;
-        scale = step;
-        codes = std::move(encoded);
-    }
-
-    template <typename ReadRow>
-    void build_mapped(size_t rows, size_t dimension, const ReadRow& read_row) {
-        if (dimension == 0 || dimension > 4096 || rows == 0) return;
-        // Segment fields can be unaligned. Reuse one row of aligned scratch
-        // space for the two passes, with the same scale and rounding as build().
-        std::vector<float> row(dimension);
-        const size_t row_bytes = dimension * sizeof(float);
-        double maximum = 0;
-#if defined(__x86_64__) || defined(__i386__)
-        const bool use_avx2 = __builtin_cpu_supports("avx2");
-#endif
-        for (size_t index = 0; index < rows; ++index) {
-            std::memcpy(row.data(), read_row(index), row_bytes);
-#if defined(__x86_64__) || defined(__i386__)
-            const float peak = use_avx2 ? maximum_abs_avx2(row.data(), dimension)
-                                       : maximum_abs_scalar(row.data(), dimension);
-#else
-            const float peak = maximum_abs_scalar(row.data(), dimension);
-#endif
-            maximum = std::max(maximum, static_cast<double>(peak));
-        }
-        if (!std::isfinite(maximum)) return;
-        const double step = quantization_step(maximum);
-        std::vector<int8_t> encoded(rows * dimension);
-        int8_t* destination = encoded.data();
-        for (size_t index = 0; index < rows; ++index) {
-            std::memcpy(row.data(), read_row(index), row_bytes);
-            size_t i = 0;
-#if defined(__x86_64__) || defined(__i386__)
-            if (use_avx2) i = encode_avx2(row.data(), destination, dimension, step);
-#endif
-            for (; i < dimension; ++i) {
-                destination[i] = int8_t(std::round(double(row[i]) / step));
-            }
-            destination += dimension;
-        }
         dim = dimension;
         scale = step;
         codes = std::move(encoded);

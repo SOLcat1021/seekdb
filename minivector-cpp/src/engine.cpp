@@ -15,7 +15,6 @@
 #include <queue>
 #include <set>
 #include <sstream>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <thread>
 #include <tuple>
@@ -579,7 +578,7 @@ bool compare_int(int64_t left, int64_t right, CmpOp op) {
     return false;
 }
 
-bool compare_str(std::string_view left, std::string_view right, CmpOp op) {
+bool compare_str(const std::string& left, const std::string& right, CmpOp op) {
     switch (op) {
         case CmpOp::Eq:
             return left == right;
@@ -799,6 +798,10 @@ double l2_distance_raw(
     return exact_scan::distance_raw(row, query, size);
 }
 
+double l2_distance_ptr(const float* a, const float* b, size_t size) {
+    return exact_scan::distance(a, b, size);
+}
+
 class RawPayloadReader {
 public:
     RawPayloadReader(const uint8_t* data, size_t size)
@@ -1012,11 +1015,12 @@ bool hot_matches(const HotSet& hot, const Predicate& predicate, size_t row) {
             continue;
         }
         if (clause.column >= hot.str_columns.size() ||
-            !hot.has_string_column(clause.column)) {
+            !hot.str_columns[clause.column].has_value()) {
             return false;
         }
-        if (row >= hot.pks.size() ||
-            !compare_str(hot.string_at(clause.column, row), clause.value.s, clause.op)) {
+        const auto& column = hot.str_columns[clause.column].value();
+        if (row >= column.size() ||
+            !compare_str(column[row], clause.value.s, clause.op)) {
             return false;
         }
     }
@@ -1033,19 +1037,19 @@ std::optional<HotRowSelection> select_hot_string_rows(
     if (predicate.clauses.size() != 1) return std::nullopt;
     const Predicate::Clause& clause = predicate.clauses.front();
     if (clause.op != CmpOp::Eq || clause.value.kind != Value::Kind::Str ||
-        !hot.has_string_column(clause.column)) return std::nullopt;
+        !hot.str_columns[clause.column]) return std::nullopt;
 
-    const size_t row_count = hot.pks.size();
-    if (row_count == 0) return HotRowSelection{nullptr, 0};
+    const auto& values = *hot.str_columns[clause.column];
+    if (values.empty()) return HotRowSelection{nullptr, 0};
     auto& cache = hot.string_rows;
     if (!cache.rows) {
         const size_t budget = std::min<size_t>(cache_budget / 64, 1024u * 1024u);
         if (budget <= sizeof(cache) ||
-            row_count > (budget - sizeof(cache)) / sizeof(uint32_t)) {
+            values.size() > (budget - sizeof(cache)) / sizeof(uint32_t)) {
             return std::nullopt;
         }
         try {
-            cache.rows.reset(new uint32_t[row_count]);
+            cache.rows.reset(new uint32_t[values.size()]);
         } catch (const std::bad_alloc&) {
             return std::nullopt;
         }
@@ -1055,7 +1059,7 @@ std::optional<HotRowSelection> select_hot_string_rows(
 
     for (size_t i = 0; i < cache.range_count; ++i) {
         const auto& range = cache.ranges[i];
-        if (hot.string_at(clause.column, cache.rows[range.begin]) == clause.value.s) {
+        if (values[cache.rows[range.begin]] == clause.value.s) {
             return HotRowSelection{cache.rows.get() + range.begin, range.count};
         }
     }
@@ -1064,8 +1068,8 @@ std::optional<HotRowSelection> select_hot_string_rows(
     // Distinct equality values select disjoint rows. The packed allocation
     // therefore holds every cached list without exceeding the budget.
     const uint32_t begin = cache.used;
-    for (size_t i = 0; i < row_count; ++i) {
-        if (hot.string_at(clause.column, i) == clause.value.s) cache.rows[cache.used++] = uint32_t(i);
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (values[i] == clause.value.s) cache.rows[cache.used++] = uint32_t(i);
     }
     const uint32_t count = cache.used - begin;
     if (count != 0) cache.ranges[cache.range_count++] = {begin, count};
@@ -2161,7 +2165,6 @@ Table Table::recover(
     size_t cache_bytes = 0;
     bool disable_cache = false;
     bool has_stale = false;
-    bool has_vector_blocks = false;
     const size_t row_cache_budget = std::min(cache_budget, kRowCacheLimit);
 
     bool pending = false;
@@ -2175,7 +2178,6 @@ Table Table::recover(
             uint32_t record_length,
             uint8_t flags,
             std::vector<Op> ops) {
-            has_vector_blocks |= (flags & kRecordFlagVectorBlock) != 0;
             records.emplace_back(offset, record_length);
             crash_point("recovery_mid");
             if ((flags & kRecordFlagCommit) != 0) {
@@ -2291,7 +2293,6 @@ Table Table::recover(
     table.schema = std::move(schema);
     table.path = std::move(path);
     table.seg = Segment::open(table.path);
-    table.seg.has_vector_blocks = has_vector_blocks;
     table.entries = std::move(entries);
     table.records = std::move(records);
     table.cache = std::move(cache);
@@ -2317,10 +2318,6 @@ bool Table::should_compact() const {
 
 bool Table::cache_covers_all() const {
     return cache.has_value() && cache->size() == entries.size();
-}
-
-void HotSet::SegmentUnmap::operator()(const uint8_t* data) const noexcept {
-    ::munmap(const_cast<uint8_t*>(data), length);
 }
 
 bool Table::ensure_hot() {
@@ -2378,55 +2375,21 @@ bool Table::ensure_hot() {
         hot = std::move(set);
         return true;
     }
-    // Keep the same admission limit while comparing the two hot layouts.
+    // The decoded-row cache is intentionally capped well below the vector
+    // budget.  Build the columnar vector set directly from the segment when
+    // the full vectors fit, but the full rows do not.
     if (entries.empty() ||
         entries.size() > cache_budget / std::max<size_t>(bytes_per_row, 1)) {
         return false;
     }
-    if (seg.len > 0 && seg.len <= std::numeric_limits<size_t>::max()) {
-        size_t length = static_cast<size_t>(seg.len);
-        void* mapped = ::mmap(nullptr, length, PROT_READ, MAP_SHARED, seg.fd, 0);
-        if (mapped != MAP_FAILED) {
-            set.mapped = decltype(set.mapped)(
-                static_cast<const uint8_t*>(mapped), HotSet::SegmentUnmap{length});
-        }
-    }
     set.pks.reserve(entries.size());
-    static const bool map_strings = std::getenv("MVD_DISABLE_MAPPED_VARCHAR") == nullptr;
-    std::vector<size_t> mapped_columns;
-    std::vector<uint32_t> row_strings;
-    if (map_strings && set.mapped && seg.len <= std::numeric_limits<uint32_t>::max()) {
-        const size_t row_budget = std::min<size_t>(cache_budget / 16, 4u * 1024u * 1024u) /
-                                  entries.size() / sizeof(uint32_t);
-        for (size_t index = 0; index < schema.columns.size() && mapped_columns.size() < row_budget; ++index) {
-            if (schema.columns[index].type.kind == TypeKind::Varchar) mapped_columns.push_back(index);
-        }
-        if (!mapped_columns.empty()) {
-            try {
-                set.string_offsets.resize(schema.columns.size());
-                row_strings.resize(schema.columns.size());
-                for (size_t index : mapped_columns) set.string_offsets[index].reserve(entries.size());
-            } catch (const std::bad_alloc&) {
-                set.string_offsets.clear();
-                mapped_columns.clear();
-                row_strings.clear();
-            }
-        }
-    }
-    if (set.mapped) {
-        set.vector_offsets.reserve(entries.size());
-        if (seg.has_vector_blocks) set.packed_vectors.reserve(entries.size());
-    } else {
-        set.vectors.reserve(entries.size() * set.dim);
-    }
+    set.vectors.reserve(entries.size() * set.dim);
     std::vector<int64_t> row_ints(schema.columns.size(), 0);
-    const uint64_t scanned = scan_segment_raw_range(
-        path, 0, seg.len,
-        [&](uint64_t offset, uint32_t, uint8_t flags, const uint8_t* payload, size_t size) {
+    scan_segment_raw(
+        path,
+        [&](uint64_t offset, uint32_t, const uint8_t* payload, size_t size) {
             RawPayloadReader reader(payload, size);
             uint32_t op_count = reader.u32();
-            const uint8_t* dictionary = flags & kRecordFlagVectorBlock
-                ? reader.take(vector_block::dictionary_size) : nullptr;
             for (uint32_t op_index = 0; op_index < op_count; ++op_index) {
                 uint8_t kind = reader.u8();
                 int64_t pk = reader.i64();
@@ -2438,7 +2401,6 @@ bool Table::ensure_hot() {
                     fail_internal("storage corrupted: unknown op kind in hot build");
                 }
                 const uint8_t* raw_vector = nullptr;
-                size_t packed_size = 0;
                 for (size_t index = 0; index < schema.columns.size(); ++index) {
                     const ColumnType& type = schema.columns[index].type;
                     switch (type.kind) {
@@ -2447,20 +2409,15 @@ bool Table::ensure_hot() {
                             break;
                         case TypeKind::Varchar: {
                             uint32_t length = reader.u32();
-                            const uint8_t* text = reader.take(length);
-                            if (!row_strings.empty()) {
-                                row_strings[index] = static_cast<uint32_t>(offset + kRawRecordHeaderSize +
-                                    (text - payload) - sizeof(length));
-                            }
+                            reader.take(length);
                             break;
                         }
                         case TypeKind::Vector: {
-                            const size_t bytes = dictionary ? reader.u32() :
+                            const size_t bytes =
                                 static_cast<size_t>(type.n) * sizeof(float);
                             const uint8_t* raw = reader.take(bytes);
                             if (index == vector_column.value()) {
                                 raw_vector = raw;
-                                if (dictionary) packed_size = bytes;
                             }
                             break;
                         }
@@ -2476,45 +2433,21 @@ bool Table::ensure_hot() {
                     fail_internal("storage corrupted: missing vector in hot build");
                 }
                 set.pks.push_back(pk);
-                for (size_t index : mapped_columns) set.string_offsets[index].push_back(row_strings[index]);
                 for (size_t index = 0; index < schema.columns.size(); ++index) {
                     if (set.int_columns[index].has_value()) {
                         set.int_columns[index]->push_back(row_ints[index]);
                     }
                 }
-                if (set.mapped) {
-                    set.vector_offsets.push_back(
-                        static_cast<size_t>(offset + kRawRecordHeaderSize + (raw_vector - payload)));
-                    if (seg.has_vector_blocks) {
-                        set.packed_vectors.push_back({
-                            dictionary ? static_cast<size_t>(offset + kRawRecordHeaderSize + sizeof(uint32_t)) : 0,
-                            packed_size});
-                    }
-                } else {
-                    size_t vector_offset = set.vectors.size();
-                    set.vectors.resize(vector_offset + set.dim);
-                    auto* dest = reinterpret_cast<uint8_t*>(set.vectors.data() + vector_offset);
-                    if (dictionary) {
-                        vector_block::decode({raw_vector, dictionary, packed_size}, set.dim, dest);
-                    } else {
-                        std::memcpy(dest, raw_vector, set.dim * sizeof(float));
-                    }
-                }
+                size_t vector_offset = set.vectors.size();
+                set.vectors.resize(vector_offset + set.dim);
+                std::memcpy(
+                    set.vectors.data() + vector_offset,
+                    raw_vector,
+                    static_cast<size_t>(set.dim) * sizeof(float));
             }
         });
-    if (scanned != seg.len || set.pks.size() != entries.size()) {
-        return false;
-    }
     if (set.pks.size() <= cache_budget / (bytes_per_row + set.dim)) {
-        try {
-            if (set.mapped) {
-                std::vector<uint8_t> scratch;
-                set.quantized.build_mapped(set.vector_offsets.size(), set.dim,
-                    [&](size_t index) { return set.vector_bytes(index, scratch); });
-            } else {
-                set.quantized.build(set.vectors, set.dim);
-            }
-        }
+        try { set.quantized.build(set.vectors, set.dim); }
         catch (const std::bad_alloc&) { /* optional accelerator */ }
     }
     hot = std::move(set);
@@ -2527,7 +2460,7 @@ bool Table::ensure_hot_string_column(size_t column) {
         return false;
     }
     auto& slot = hot->str_columns[column];
-    if (hot->has_string_column(column)) {
+    if (slot.has_value()) {
         return true;
     }
     const size_t limit = std::max<size_t>(
@@ -2555,7 +2488,6 @@ bool Table::ensure_hot_string_column(size_t column) {
             path,
             [&](uint64_t offset,
                 uint32_t,
-                uint8_t flags,
                 const uint8_t* payload,
                 size_t size) {
                 if (too_large) {
@@ -2563,8 +2495,6 @@ bool Table::ensure_hot_string_column(size_t column) {
                 }
                 RawPayloadReader reader(payload, size);
                 uint32_t op_count = reader.u32();
-                const bool packed = (flags & kRecordFlagVectorBlock) != 0;
-                if (packed) reader.take(vector_block::dictionary_size);
                 for (uint32_t op_index = 0; op_index < op_count; ++op_index) {
                     uint8_t kind = reader.u8();
                     int64_t pk = reader.i64();
@@ -2594,7 +2524,7 @@ bool Table::ensure_hot_string_column(size_t column) {
                                 break;
                             }
                             case TypeKind::Vector:
-                                reader.take(packed ? reader.u32() :
+                                reader.take(
                                     static_cast<size_t>(type.n) * sizeof(float));
                                 break;
                         }
@@ -2842,7 +2772,7 @@ bool Table::build_ann_index() {
                              const std::vector<int64_t>&)>& visit) {
         scan_segment_raw(
             path,
-            [&](uint64_t offset, uint32_t, uint8_t, const uint8_t* payload, size_t size) {
+            [&](uint64_t offset, uint32_t, const uint8_t* payload, size_t size) {
                 RawPayloadReader reader(payload, size);
                 uint32_t op_count = reader.u32();
                 for (uint32_t op_index = 0; op_index < op_count; ++op_index) {
@@ -3112,8 +3042,6 @@ bool Table::build_ann_index() {
 }
 
 bool Table::ensure_ann_index() {
-    // This index stores direct offsets to uncompressed vector fields.
-    if (seg.has_vector_blocks) return false;
     if (ann_budget_bytes > 0 &&
         estimate_ann_peak(*this) > ann_budget_bytes) {
         return false;
@@ -3355,7 +3283,6 @@ void Table::abort_statement_batch() {
 }
 
 void Table::compact() {
-    hot.reset();
     ann.reset();
     std::string temporary = path + ".tmp";
     int fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -3416,7 +3343,6 @@ void Table::compact() {
             found->second.share = new_length;
         }
     }
-    seg.has_vector_blocks = false;
     live_bytes = offset;
     records = std::move(new_records);
     has_stale = false;
@@ -4644,18 +4570,18 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                                  size_t end,
                                  std::vector<HotCandidate>& output) {
                 HotHeap heap(HotCompare{asc});
-                std::vector<uint8_t> scratch;
                 const auto worst = [&] {
                     return heap.size() == keep ? heap.top().distance
                         : std::numeric_limits<double>::infinity();
                 };
                 scan_hot(begin, end, worst, [&](size_t index) {
-                    const uint8_t* row = hot.vector_bytes(index, scratch);
-                    float approx = l2_sq_raw(row, query.data(), hot.dim, use_avx);
+                    const float* row = hot.vectors.data() + index * hot.dim;
+                    float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
+                                             query.data(), hot.dim, use_avx);
                     if (heap.size() == keep &&
                         bound.rejects(approx, heap.top().distance, asc)) return;
                     HotCandidate candidate{
-                        l2_distance_raw(row, query.data(), hot.dim), hot.pks[index], index};
+                        l2_distance_ptr(row, query.data(), hot.dim), hot.pks[index], index};
                     if (heap.size() < keep) {
                         heap.push(candidate);
                     } else if (HotCompare{asc}(candidate, heap.top())) {
@@ -4715,18 +4641,18 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         } else {
             candidates.reserve(std::min(keep, scan_count));
             const HotCompare compare{asc};
-            std::vector<uint8_t> scratch;
             const auto worst = [&] {
                 return candidates.size() == keep ? candidates.front().distance
                     : std::numeric_limits<double>::infinity();
             };
             scan_hot(0, scan_count, worst, [&](size_t index) {
-                const uint8_t* row = hot.vector_bytes(index, scratch);
-                float approx = l2_sq_raw(row, query.data(), hot.dim, use_avx);
+                const float* row = hot.vectors.data() + index * hot.dim;
+                float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
+                                         query.data(), hot.dim, use_avx);
                 if (candidates.size() == keep &&
                     bound.rejects(approx, candidates.front().distance, asc)) return;
                 HotCandidate candidate{
-                    l2_distance_raw(row, query.data(), hot.dim), hot.pks[index], index};
+                    l2_distance_ptr(row, query.data(), hot.dim), hot.pks[index], index};
                 if (candidates.size() < keep) {
                     candidates.push_back(candidate);
                     std::push_heap(candidates.begin(), candidates.end(), compare);
@@ -4777,17 +4703,18 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
             }
         }
         if (direct_projection) {
-            std::vector<uint8_t> scratch;
             for (const HotFinal& item : finals) {
                 std::vector<OutputValue> values;
                 values.reserve(projections.size());
                 for (const Projection& projection : projections) {
                     if (projection.kind == Projection::Kind::Distance) {
+                        const float* row =
+                            hot.vectors.data() + item.index * hot.dim;
                         values.push_back(OutputValue::floating(
                             projection.query == *distance_target->query
                                 ? item.distance
-                                : l2_distance_raw(hot.vector_bytes(item.index, scratch),
-                                                  projection.query.data(), hot.dim)));
+                                : l2_distance_ptr(
+                                      row, projection.query.data(), hot.dim)));
                     } else {
                         values.push_back(OutputValue::integer(
                             (*hot.int_columns[projection.column])[item.index]));
@@ -4826,7 +4753,6 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         const bool use_avx = avx2_available();
         const size_t keep = limit;
         const exact_scan::Bound bound(dim);
-        static const bool packed_screen = std::getenv("MVD_DISABLE_PACKED_SCREEN") == nullptr;
         struct StreamCandidate {
             double exact;
             int64_t pk;
@@ -4853,17 +4779,13 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                 return clause.value.kind == Value::Kind::Str;
             });
         auto process_payload = [&](uint64_t offset,
-                                   uint8_t flags,
                                    const uint8_t* payload,
                                    size_t size,
                                    StreamHeap& heap,
                                    std::vector<int64_t>& int_values,
-                                   std::vector<std::string_view>& string_values,
-                                   std::vector<uint8_t>& scratch) {
+                                   std::vector<std::string_view>& string_values) {
             RawPayloadReader reader(payload, size);
             uint32_t op_count = reader.u32();
-            const uint8_t* dictionary = flags & kRecordFlagVectorBlock
-                ? reader.take(vector_block::dictionary_size) : nullptr;
             for (uint32_t op_index = 0; op_index < op_count; ++op_index) {
                 uint8_t kind = reader.u8();
                 int64_t pk = reader.i64();
@@ -4875,7 +4797,6 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                     fail_internal("storage corrupted: unknown raw op kind");
                 }
                 const uint8_t* raw_vector = nullptr;
-                size_t packed_size = 0;
                 for (size_t column = 0; column < schema.columns.size(); ++column) {
                     const ColumnType& type = schema.columns[column].type;
                     switch (type.kind) {
@@ -4892,12 +4813,11 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                             break;
                         }
                         case TypeKind::Vector: {
-                            const size_t bytes = dictionary ? reader.u32() :
+                            const size_t bytes =
                                 static_cast<size_t>(type.n) * sizeof(float);
                             const uint8_t* raw = reader.take(bytes);
                             if (column == vector_column) {
                                 raw_vector = raw;
-                                if (dictionary) packed_size = bytes;
                             }
                             break;
                         }
@@ -4926,24 +4846,6 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                 if (raw_vector == nullptr) {
                     fail_internal("storage corrupted: missing raw vector");
                 }
-                if (dictionary) {
-#if defined(__x86_64__) || defined(__i386__)
-                    if (packed_screen && use_avx && asc && dim % 16 == 0 &&
-                        heap.size() == keep &&
-                        bound.relative < 0.25) {
-                        const double worst = heap.top().exact;
-                        const double threshold = worst * worst;
-                        const double cutoff = threshold + threshold * bound.relative + bound.absolute;
-                        const vector_block::View packed{raw_vector, dictionary, packed_size};
-                        if (packed_size == 3 * dim && vector_block::screen_fixed(packed, query, dim, cutoff)) continue;
-                        if (packed_size == vector_block::packed_prefix(dim) &&
-                            vector_block::screen_dense(packed, query, dim, cutoff)) continue;
-                    }
-#endif
-                    scratch.resize(dim * sizeof(float));
-                    vector_block::decode({raw_vector, dictionary, packed_size}, dim, scratch.data());
-                    raw_vector = scratch.data();
-                }
                 const float approx = l2_sq_raw(raw_vector, query, dim, use_avx);
                 if (heap.size() == keep &&
                     bound.rejects(approx, heap.top().exact, asc)) continue;
@@ -4959,17 +4861,15 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         auto scan_range = [&](uint64_t start, uint64_t end, StreamHeap& heap) {
             std::vector<int64_t> int_values(schema.columns.size(), 0);
             std::vector<std::string_view> string_values(filter_strings ? schema.columns.size() : 0);
-            std::vector<uint8_t> scratch;
             scan_segment_raw_range(
                 table.path,
                 start,
                 end,
                 [&](uint64_t offset,
                     uint32_t,
-                    uint8_t flags,
                     const uint8_t* payload,
                     size_t size) {
-                    process_payload(offset, flags, payload, size, heap, int_values, string_values, scratch);
+                    process_payload(offset, payload, size, heap, int_values, string_values);
                 });
         };
         size_t requested_threads = threads;
