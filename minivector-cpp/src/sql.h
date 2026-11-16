@@ -92,7 +92,7 @@ struct Stmt {
     bool autocommit = false;
 };
 
-Stmt parse_statement(const std::string& input);
+Stmt parse_statement(std::string_view input);
 
 // Split a large INSERT ... VALUES statement into syntactically complete
 // statements of at most rows_per_chunk rows. Returns false when the text is

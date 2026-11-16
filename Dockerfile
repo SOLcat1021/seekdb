@@ -11,6 +11,7 @@ COPY minivector-cpp/src ./src
 RUN make
 
 FROM debian:bookworm-slim
+ENV MVD_PIPELINE_JSON_VIEW=1 MVDB_PREALLOC_BYTES=8388608
 RUN mkdir -p /data
 COPY --from=builder /build/bin/minivector /usr/local/bin/minivector
 WORKDIR /

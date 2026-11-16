@@ -145,12 +145,138 @@ __attribute__((target("avx2"))) inline unsigned reject_four_avx2(
     return static_cast<unsigned>(_mm_movemask_ps(
         _mm_castsi128_ps(_mm_cmpgt_epi32(sums, _mm_set1_epi32(cutoff)))));
 }
+__attribute__((target("avx2,avxvnni"))) inline unsigned reject_four_vnni(
+    const std::array<const int8_t*, 4>& rows, const uint8_t* query,
+    size_t dim, const std::array<int32_t, 4>& limits) {
+    auto a = _mm256_setzero_si256();
+    auto b = a, c = a, d = a;
+    for (size_t i = 0; i < dim; i += 32) {
+        const auto q = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query + i));
+        a = _mm256_dpbusd_avx_epi32(a, q, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rows[0] + i)));
+        b = _mm256_dpbusd_avx_epi32(b, q, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rows[1] + i)));
+        c = _mm256_dpbusd_avx_epi32(c, q, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rows[2] + i)));
+        d = _mm256_dpbusd_avx_epi32(d, q, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rows[3] + i)));
+    }
+    const auto halves = _mm256_hadd_epi32(_mm256_hadd_epi32(a, b), _mm256_hadd_epi32(c, d));
+    const auto dots = _mm_add_epi32(_mm256_castsi256_si128(halves), _mm256_extracti128_si256(halves, 1));
+    const auto doubled = _mm_add_epi32(dots, dots);
+    const auto cutoffs = _mm_loadu_si128(reinterpret_cast<const __m128i*>(limits.data()));
+    return static_cast<unsigned>(_mm_movemask_ps(_mm_castsi128_ps(_mm_cmpgt_epi32(cutoffs, doubled))));
+}
+
+inline bool vnni_available() {
+    static const bool available = std::getenv("MVD_DISABLE_Q8_VNNI") == nullptr &&
+        __builtin_cpu_supports("avx2") && __builtin_cpu_supports("avxvnni");
+    return available;
+}
+__attribute__((target("avx512f,avx512bw,avx512vnni"))) inline unsigned reject_four_vnni_wide(
+    const std::array<const int8_t*, 4>& rows, const uint8_t* query, size_t dim,
+    const std::array<int32_t, 4>& limits) {
+    __m512i a = _mm512_setzero_si512();
+    __m512i b = a, c = a, d = a;
+    for (size_t i = 0; i < dim; i += 64) {
+        const __m512i q = _mm512_loadu_si512(query + i);
+        a = _mm512_dpbusd_epi32(a, q, _mm512_loadu_si512(rows[0] + i));
+        b = _mm512_dpbusd_epi32(b, q, _mm512_loadu_si512(rows[1] + i));
+        c = _mm512_dpbusd_epi32(c, q, _mm512_loadu_si512(rows[2] + i));
+        d = _mm512_dpbusd_epi32(d, q, _mm512_loadu_si512(rows[3] + i));
+    }
+    const std::array<int32_t, 4> dots{
+        _mm512_reduce_add_epi32(a), _mm512_reduce_add_epi32(b),
+        _mm512_reduce_add_epi32(c), _mm512_reduce_add_epi32(d)};
+    unsigned mask = 0;
+    for (size_t lane = 0; lane < dots.size(); ++lane) {
+        if (limits[lane] > 2 * dots[lane]) mask |= 1u << lane;
+    }
+    return mask;
+}
+
+__attribute__((target("avx512f,avx512bw,avx512vnni"))) inline unsigned reject_tile_wide(
+    const int8_t* tile, const uint8_t* query, size_t dim, const int32_t* terms, int32_t cutoff) {
+    auto dot = _mm512_setzero_si512();
+    auto odd = dot;
+    for (size_t i = 0; i < dim; i += 8) {
+        int32_t first, second;
+        std::memcpy(&first, query + i, sizeof(first));
+        std::memcpy(&second, query + i + 4, sizeof(second));
+        dot = _mm512_dpbusd_epi32(dot, _mm512_set1_epi32(first), _mm512_loadu_si512(tile + i * 16));
+        odd = _mm512_dpbusd_epi32(odd, _mm512_set1_epi32(second), _mm512_loadu_si512(tile + i * 16 + 64));
+    }
+    dot = _mm512_add_epi32(dot, odd);
+    return _mm512_cmpgt_epi32_mask(_mm512_loadu_si512(terms),
+        _mm512_add_epi32(_mm512_add_epi32(dot, dot), _mm512_set1_epi32(cutoff)));
+}
+
+__attribute__((target("avx512f,avx512bw,avx512vnni"))) inline int32_t dot_tiled_row(
+    const int8_t* row, const uint8_t* query, size_t dim) {
+    const auto indices = _mm512_setr_epi32(0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240);
+    auto dot = _mm512_setzero_si512();
+    for (size_t i = 0; i < dim; i += 64) {
+        dot = _mm512_dpbusd_epi32(dot, _mm512_loadu_si512(query + i),
+            _mm512_i32gather_epi32(indices, row + i * 16, 4));
+    }
+    return _mm512_reduce_add_epi32(dot);
+}
+
+inline bool wide_vnni_available() {
+    static const bool available = std::getenv("MVD_DISABLE_WIDE_Q8") == nullptr &&
+        __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
+        __builtin_cpu_supports("avx512vnni");
+    return available;
+}
 #endif
 
 struct Cache {
     size_t dim = 0;
     double scale = 0;
     std::vector<int8_t> codes;
+
+    std::vector<int32_t> vnni_terms;
+    size_t tiled_rows = 0;
+
+    void build_vnni_terms(size_t budget) {
+#if defined(__x86_64__) || defined(__i386__)
+        if (!dim || dim % 32 || (!vnni_available() && !(dim % 64 == 0 && wide_vnni_available()))) return;
+        const size_t rows = codes.size() / dim;
+        if (rows > budget / sizeof(int32_t)) return;
+        std::vector<int32_t> terms(rows);
+        for (size_t row = 0; row < rows; ++row) {
+            int32_t term = 0;
+            for (size_t i = 0; i < dim; ++i) {
+                const int32_t x = codes[row * dim + i];
+                term += x * (x + 256);
+            }
+            terms[row] = term;
+        }
+        vnni_terms = std::move(terms);
+        static const bool tile_enabled = std::getenv("MVD_PIPELINE_TILED_Q8") != nullptr;
+        if (tile_enabled && dim % 64 == 0 && rows >= 16 && wide_vnni_available()) {
+            // Replace the row-major copy in place. An incomplete tail stays row-major.
+            std::vector<int8_t> scratch(16 * dim);
+            tiled_rows = rows / 16 * 16;
+            for (size_t start = 0; start < tiled_rows; start += 16) {
+                auto* tile = codes.data() + start * dim;
+                for (size_t i = 0; i < dim; i += 4) {
+                    for (size_t lane = 0; lane < 16; ++lane) {
+                        std::memcpy(scratch.data() + i * 16 + lane * 4, tile + lane * dim + i, 4);
+                    }
+                }
+                std::memcpy(tile, scratch.data(), scratch.size());
+            }
+        }
+#else
+        (void)budget;
+#endif
+    }
+
+    static double quantization_step(double maximum) {
+        int exponent = 0;
+        std::frexp(maximum, &exponent);
+        double step = maximum == 0 ? 1.0 : std::ldexp(1.0, exponent - 7);
+        if (maximum > 127.0 * step) step *= 2;
+        return step;
+    }
+
     void build(const std::vector<float>& values, size_t dimension, bool allow_avx2 = true) {
         if (dimension == 0 || dimension > 4096 || values.empty() ||
             values.size() % dimension) return;
@@ -163,10 +289,7 @@ struct Cache {
         const double maximum = maximum_abs_scalar(values.data(), values.size());
 #endif
         if (!std::isfinite(maximum)) return;
-        int exponent = 0;
-        std::frexp(maximum, &exponent);
-        double step = maximum == 0 ? 1.0 : std::ldexp(1.0, exponent-7);
-        if (maximum > 127.0 * step) step *= 2;
+        const double step = quantization_step(maximum);
         std::vector<int8_t> encoded(values.size());
         size_t i = 0;
 #if defined(__x86_64__) || defined(__i386__)
@@ -178,15 +301,59 @@ struct Cache {
         scale = step;
         codes = std::move(encoded);
     }
+
+    template <typename ReadRow>
+    void build_mapped(size_t rows, size_t dimension, const ReadRow& read_row) {
+        if (dimension == 0 || dimension > 4096 || rows == 0) return;
+        // Segment fields can be unaligned. Reuse one row of aligned scratch
+        // space for the two passes, with the same scale and rounding as build().
+        std::vector<float> row(dimension);
+        const size_t row_bytes = dimension * sizeof(float);
+        double maximum = 0;
+#if defined(__x86_64__) || defined(__i386__)
+        const bool use_avx2 = __builtin_cpu_supports("avx2");
+#endif
+        for (size_t index = 0; index < rows; ++index) {
+            std::memcpy(row.data(), read_row(index), row_bytes);
+#if defined(__x86_64__) || defined(__i386__)
+            const float peak = use_avx2 ? maximum_abs_avx2(row.data(), dimension)
+                                       : maximum_abs_scalar(row.data(), dimension);
+#else
+            const float peak = maximum_abs_scalar(row.data(), dimension);
+#endif
+            maximum = std::max(maximum, static_cast<double>(peak));
+        }
+        if (!std::isfinite(maximum)) return;
+        const double step = quantization_step(maximum);
+        std::vector<int8_t> encoded(rows * dimension);
+        int8_t* destination = encoded.data();
+        for (size_t index = 0; index < rows; ++index) {
+            std::memcpy(row.data(), read_row(index), row_bytes);
+            size_t i = 0;
+#if defined(__x86_64__) || defined(__i386__)
+            if (use_avx2) i = encode_avx2(row.data(), destination, dimension, step);
+#endif
+            for (; i < dimension; ++i) {
+                destination[i] = int8_t(std::round(double(row[i]) / step));
+            }
+            destination += dimension;
+        }
+        dim = dimension;
+        scale = step;
+        codes = std::move(encoded);
+    }
 };
 
 struct Query {
     const Cache* cache = nullptr;
     std::vector<int8_t> codes;
+    std::vector<uint8_t> unsigned_codes;
+    int32_t query_norm = 0;
     bool simd = false;
     double previous = -1, cutoff = 0;
     Query(const Cache& data, const std::vector<float>& q, bool use_simd, bool asc) {
-        if (!asc || !data.scale || data.dim != q.size()) return;
+        if (!asc || !data.scale || data.dim != q.size() ||
+            (!use_simd && data.tiled_rows)) return;
         codes.resize(q.size());
         for (size_t i = 0; i < q.size(); ++i) {
             double v = double(q[i]) / data.scale;
@@ -195,6 +362,13 @@ struct Query {
         }
         cache = &data;
         simd = use_simd;
+        if (simd && !data.vnni_terms.empty()) {
+            unsigned_codes.reserve(codes.size());
+            for (int32_t q8 : codes) {
+                unsigned_codes.push_back(static_cast<uint8_t>(q8 + 128));
+                query_norm += q8 * q8;
+            }
+        }
     }
     bool can_batch() const {
 #if defined(__x86_64__) || defined(__i386__)
@@ -219,7 +393,40 @@ struct Query {
         }
     }
 
+    bool has_tiles() const {
+        return cache && !unsigned_codes.empty() && cache->tiled_rows != 0;
+    }
+
+    unsigned rejects_tile(size_t start, double worst) {
+#if defined(__x86_64__) || defined(__i386__)
+        update_cutoff(worst);
+        unsigned mask = 0;
+        const size_t dim = cache->dim;
+        if (cutoff <= dim * 254 * 254) {
+            mask = reject_tile_wide(cache->codes.data() + start * dim, unsigned_codes.data(),
+                                    dim, cache->vnni_terms.data() + start,
+                                    static_cast<int32_t>(cutoff) - query_norm);
+        }
+        if (stats.enabled) {
+            stats.examined.fetch_add(16, std::memory_order_relaxed);
+            stats.rejected.fetch_add(__builtin_popcount(mask), std::memory_order_relaxed);
+        }
+        return mask;
+#else
+        (void)start;
+        (void)worst;
+        return 0;
+#endif
+    }
+
     unsigned rejects_four(const std::array<size_t, 4>& indices, double worst) {
+        if (has_tiles()) {
+            unsigned mask = 0;
+            for (size_t lane = 0; lane < indices.size(); ++lane) {
+                if (rejects(indices[lane], worst)) mask |= 1u << lane;
+            }
+            return mask;
+        }
 #if defined(__x86_64__) || defined(__i386__)
         update_cutoff(worst);
         // For an integer distance, > floor(cutoff) is equivalent to > cutoff.
@@ -230,7 +437,25 @@ struct Query {
             const std::array<const int8_t*, 4> rows{
                 base + indices[0] * dim, base + indices[1] * dim,
                 base + indices[2] * dim, base + indices[3] * dim};
-            rejected = reject_four_avx2(rows, codes.data(), dim, static_cast<int>(cutoff));
+            const int32_t limit = static_cast<int32_t>(cutoff);
+            // All operations here are exact integer operations on Q8 values.
+            // ||x-q||² = sum(x²+256*x) + ||q||² - 2*dot(x,q+128).
+            // The largest possible distance is 4096*254², so a larger cutoff
+            // cannot reject anything and subtraction stays in int32 range.
+            if (!unsigned_codes.empty() && limit <= static_cast<int32_t>(dim * 254 * 254)) {
+                const std::array<int32_t, 4> limits{
+                    cache->vnni_terms[indices[0]] + query_norm - limit,
+                    cache->vnni_terms[indices[1]] + query_norm - limit,
+                    cache->vnni_terms[indices[2]] + query_norm - limit,
+                    cache->vnni_terms[indices[3]] + query_norm - limit};
+                if (dim % 64 == 0 && wide_vnni_available()) {
+                    rejected = reject_four_vnni_wide(rows, unsigned_codes.data(), dim, limits);
+                } else {
+                    rejected = reject_four_vnni(rows, unsigned_codes.data(), dim, limits);
+                }
+            } else if (limit <= static_cast<int32_t>(dim * 254 * 254)) {
+                rejected = reject_four_avx2(rows, codes.data(), dim, limit);
+            }
         }
         if (stats.enabled) {
             stats.examined.fetch_add(4, std::memory_order_relaxed);
@@ -250,7 +475,14 @@ struct Query {
         const int8_t* p = cache->codes.data() + row * cache->dim;
         uint32_t sq;
 #if defined(__x86_64__) || defined(__i386__)
-        sq = simd ? avx2(p, codes.data(), cache->dim) : scalar(p, codes.data(), cache->dim);
+        if (row < cache->tiled_rows) {
+            const size_t first = row / 16 * 16;
+            const auto* lane = cache->codes.data() + first * cache->dim + (row % 16) * 4;
+            const int32_t dot = dot_tiled_row(lane, unsigned_codes.data(), cache->dim);
+            sq = static_cast<uint32_t>(cache->vnni_terms[row] + query_norm - 2 * dot);
+        } else {
+            sq = simd ? avx2(p, codes.data(), cache->dim) : scalar(p, codes.data(), cache->dim);
+        }
 #else
         sq = scalar(p, codes.data(), cache->dim);
 #endif

@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <charconv>
+#include <cerrno>
 #include <csignal>
 #include <cctype>
 #include <cmath>
@@ -88,6 +90,7 @@ struct JsonRequest {
     bool has_id = false;
     std::string op;
     std::string sql;
+    std::string_view sql_view;
     std::string mode = "exact";
 };
 
@@ -106,12 +109,19 @@ public:
             return position_ == text_.size();
         }
         std::set<std::string> seen;
+        unsigned seen_fields = 0;
+        static const bool borrow_sql = std::getenv("MVD_PIPELINE_JSON_VIEW") != nullptr;
         while (true) {
             std::string key;
             if (!parse_string(key)) {
                 return false;
             }
-            if (!seen.insert(key).second) {
+            const unsigned field = key == "id" ? 1 : key == "op" ? 2 :
+                                   key == "sql" ? 4 : key == "search_mode" ? 8 : 0;
+            if (borrow_sql && field) {
+                if (seen_fields & field) return false;
+                seen_fields |= field;
+            } else if (!seen.insert(key).second) {
                 return false;
             }
             skip_space();
@@ -132,9 +142,7 @@ public:
                     return false;
                 }
             } else if (key == "sql") {
-                if (!parse_string(request.sql)) {
-                    return false;
-                }
+                if (!parse_sql(request, borrow_sql)) return false;
             } else if (key == "search_mode") {
                 if (!parse_string(request.mode)) {
                     return false;
@@ -192,6 +200,21 @@ private:
                 return false;
             }
         }
+        return true;
+    }
+
+    bool parse_sql(JsonRequest& request, bool borrow) {
+        if (borrow && position_ < text_.size() && text_[position_] == '"') {
+            const size_t begin = position_ + 1;
+            const size_t span = plain_text_span(text_.data() + begin, text_.size() - begin, '"', true);
+            if (begin + span < text_.size() && text_[begin + span] == '"') {
+                request.sql_view = text_.substr(begin, span);
+                position_ = begin + span + 1;
+                return true;
+            }
+        }
+        if (!parse_string(request.sql)) return false;
+        request.sql_view = request.sql;
         return true;
     }
 
@@ -444,7 +467,15 @@ void append_json_value(std::string& out, const OutputValue& value) {
             out += json_quote(value.s);
             return;
         case OutputValue::Kind::Float:
-            out += std::isfinite(value.f) ? format_f64(value.f) : "0";
+            if (std::isfinite(value.f) && value.f != 0) {
+                char buffer[64];
+                const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value.f);
+                if (result.ec == std::errc()) {
+                    out.append(buffer, result.ptr);
+                    return;
+                }
+            }
+            out.push_back('0');
             return;
         case OutputValue::Kind::Vec:
             out.push_back('[');
@@ -549,20 +580,21 @@ std::string json_response(
         out += "],\"rows\":[";
         bool first_row = true;
         for (const auto& row : response.query.rows) {
-            std::string encoded;
-            encoded.push_back('[');
-            for (size_t index = 0; index < row.size(); ++index) {
-                if (index > 0) {
-                    encoded.push_back(',');
-                }
-                append_json_value(encoded, row[index]);
-            }
-            encoded.push_back(']');
             if (!first_row) {
                 out.push_back(',');
             }
             first_row = false;
-            out += encoded;
+            out.push_back('[');
+            for (size_t index = 0; index < row.size(); ++index) {
+                if (index > 0) {
+                    out.push_back(',');
+                }
+                append_json_value(out, row[index]);
+                if (out.size() > max_response_bytes) {
+                    throw ResponseTooLarge{};
+                }
+            }
+            out.push_back(']');
             if (out.size() + 3 > max_response_bytes) {
                 throw ResponseTooLarge{};
             }
@@ -1043,61 +1075,130 @@ void run_text(
     }
 }
 
+bool write_json(std::string_view response) {
+    while (!response.empty()) {
+        const ssize_t written = ::write(STDOUT_FILENO, response.data(), response.size());
+        if (written < 0 && errno == EINTR && !stop_requested) {
+            continue;
+        }
+        if (written <= 0) {
+            return false;
+        }
+        response.remove_prefix(static_cast<size_t>(written));
+    }
+    return true;
+}
+
+struct PipelineTiming {
+    using Clock = std::chrono::steady_clock;
+    struct Totals {
+        uint64_t count = 0;
+        std::array<int64_t, 5> nanoseconds{};
+    };
+    bool enabled = std::getenv("MVD_PIPELINE_PROFILE") != nullptr;
+    Totals select, other;
+    Clock::time_point sample() const {
+        return enabled ? Clock::now() : Clock::time_point{};
+    }
+    void record(bool query, const std::array<Clock::time_point, 6>& stages) {
+        if (!enabled) return;
+        auto& totals = query ? select : other;
+        ++totals.count;
+        for (size_t i = 0; i < totals.nanoseconds.size(); ++i) {
+            totals.nanoseconds[i] += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                stages[i+1] - stages[i]).count();
+        }
+    }
+    ~PipelineTiming() {
+        if (!enabled) return;
+        for (const auto& item : {std::make_pair("SELECT", &select), std::make_pair("OTHER", &other)}) {
+            std::fprintf(stderr, "MVD_PIPELINE %s %llu", item.first,
+                         static_cast<unsigned long long>(item.second->count));
+            for (const auto elapsed : item.second->nanoseconds) {
+                std::fprintf(stderr, " %lld", static_cast<long long>(elapsed));
+            }
+            std::fputc('\n', stderr);
+        }
+    }
+};
+
 void run_json_loop(
     Database& database,
     std::optional<Txn>& txn,
     size_t max_response_bytes) {
+    PipelineTiming timing;
     std::string line;
     while (std::getline(std::cin, line)) {
         if (stop_requested) {
             break;
         }
+        const auto received = timing.sample();
         JsonRequest request;
         JsonParser parser(line);
         if (!parser.parse(request) || !request.has_id || request.op.empty()) {
             DbError error(1064, "42000", "invalid JSON request");
-            std::cout << json_error_response("0", error);
-            std::cout.flush();
+            if (!write_json(json_error_response("0", error))) return;
             continue;
         }
+        std::string encoded;
+        const auto json_done = timing.sample();
+        auto sql_done = json_done;
+        auto engine_done = json_done;
+        bool is_query = false;
+        bool completed = false;
         try {
             if (request.op == "shutdown") {
                 txn.reset();
-                std::cout << json_response(
-                    request.id_json, Response::ok(), max_response_bytes);
-                std::cout.flush();
+                write_json(json_response(request.id_json, Response::ok(), max_response_bytes));
                 return;
             }
             if (request.op != "execute") {
                 throw DbError(1235, "42000", "unsupported operation");
             }
             database.ann_mode = iequals(request.mode, "ann");
-            std::string sql = trim(request.sql);
+            auto sql = request.sql_view;
+            std::string owned_sql;
+            static const bool borrow_sql = std::getenv("MVD_PIPELINE_JSON_VIEW") != nullptr;
+            if (borrow_sql) {
+                while (!sql.empty() && std::isspace(static_cast<unsigned char>(sql.front()))) sql.remove_prefix(1);
+                while (!sql.empty() && std::isspace(static_cast<unsigned char>(sql.back()))) sql.remove_suffix(1);
+            } else {
+                owned_sql = trim(sql);
+                sql = owned_sql;
+            }
             if (sql.empty()) {
                 throw DbError(1064, "42000", "empty SQL");
             }
             Response response;
             if (sql.size() > (1u << 20) &&
                 iequals(sql.substr(0, 6), "INSERT")) {
-                response = database.execute_large_insert(sql, txn);
+                sql_done = timing.sample();
+                response = database.execute_large_insert(std::string(sql), txn);
             } else {
                 Stmt statement = parse_statement(sql);
+                is_query = statement.kind == StmtKind::Select;
+                sql_done = timing.sample();
                 response = database.execute(statement, txn);
             }
-            std::cout << json_response(
-                request.id_json, response, max_response_bytes);
+            engine_done = timing.sample();
+            encoded = json_response(request.id_json, response, max_response_bytes);
+            completed = true;
         } catch (const ResponseTooLarge&) {
-            std::cout << json_error_response(
+            encoded = json_error_response(
                 request.id_json,
                 "response_too_large",
                 "result exceeds the response wire limit");
         } catch (const DbError& error) {
-            std::cout << json_error_response(request.id_json, error);
+            encoded = json_error_response(request.id_json, error);
         } catch (const std::exception& error) {
             DbError wrapped(1105, "HY000", error.what());
-            std::cout << json_error_response(request.id_json, wrapped);
+            encoded = json_error_response(request.id_json, wrapped);
         }
-        std::cout.flush();
+        const auto encode_done = timing.sample();
+        if (!write_json(encoded)) return;
+        if (completed) {
+            timing.record(is_query, {received, json_done, sql_done, engine_done, encode_done, timing.sample()});
+        }
     }
 }
 
@@ -1138,8 +1239,7 @@ int main(int argc, char** argv) {
     }
     std::optional<Txn> txn;
     if (config.protocol == "json") {
-        std::cout << "{\"type\":\"ready\"}\n";
-        std::cout.flush();
+        if (!write_json("{\"type\":\"ready\"}\n")) return 1;
         run_json_loop(database, txn, config.max_response_bytes);
         return 0;
     }

@@ -15,6 +15,7 @@
 #include <queue>
 #include <set>
 #include <sstream>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <thread>
 #include <tuple>
@@ -796,10 +797,6 @@ double l2_distance_raw(
     const float* query,
     size_t size) {
     return exact_scan::distance_raw(row, query, size);
-}
-
-double l2_distance_ptr(const float* a, const float* b, size_t size) {
-    return exact_scan::distance(a, b, size);
 }
 
 class RawPayloadReader {
@@ -2165,6 +2162,7 @@ Table Table::recover(
     size_t cache_bytes = 0;
     bool disable_cache = false;
     bool has_stale = false;
+    bool has_vector_blocks = false;
     const size_t row_cache_budget = std::min(cache_budget, kRowCacheLimit);
 
     bool pending = false;
@@ -2178,6 +2176,7 @@ Table Table::recover(
             uint32_t record_length,
             uint8_t flags,
             std::vector<Op> ops) {
+            has_vector_blocks |= (flags & kRecordFlagVectorBlock) != 0;
             records.emplace_back(offset, record_length);
             crash_point("recovery_mid");
             if ((flags & kRecordFlagCommit) != 0) {
@@ -2293,6 +2292,7 @@ Table Table::recover(
     table.schema = std::move(schema);
     table.path = std::move(path);
     table.seg = Segment::open(table.path);
+    table.seg.has_vector_blocks = has_vector_blocks;
     table.entries = std::move(entries);
     table.records = std::move(records);
     table.cache = std::move(cache);
@@ -2318,6 +2318,10 @@ bool Table::should_compact() const {
 
 bool Table::cache_covers_all() const {
     return cache.has_value() && cache->size() == entries.size();
+}
+
+void HotSet::SegmentUnmap::operator()(const uint8_t* data) const noexcept {
+    ::munmap(const_cast<uint8_t*>(data), length);
 }
 
 bool Table::ensure_hot() {
@@ -2372,24 +2376,39 @@ bool Table::ensure_hot() {
             try { set.quantized.build(set.vectors, set.dim); }
             catch (const std::bad_alloc&) { /* optional accelerator */ }
         }
+        try { set.quantized.build_vnni_terms(cache_budget / 64); }
+        catch (const std::bad_alloc&) { /* optional accelerator */ }
         hot = std::move(set);
         return true;
     }
-    // The decoded-row cache is intentionally capped well below the vector
-    // budget.  Build the columnar vector set directly from the segment when
-    // the full vectors fit, but the full rows do not.
+    // Keep the same admission limit while comparing the two hot layouts.
     if (entries.empty() ||
         entries.size() > cache_budget / std::max<size_t>(bytes_per_row, 1)) {
         return false;
     }
+    if (seg.len > 0 && seg.len <= std::numeric_limits<size_t>::max()) {
+        size_t length = static_cast<size_t>(seg.len);
+        void* mapped = ::mmap(nullptr, length, PROT_READ, MAP_SHARED, seg.fd, 0);
+        if (mapped != MAP_FAILED) {
+            set.mapped = decltype(set.mapped)(
+                static_cast<const uint8_t*>(mapped), HotSet::SegmentUnmap{length});
+        }
+    }
     set.pks.reserve(entries.size());
-    set.vectors.reserve(entries.size() * set.dim);
+    if (set.mapped) {
+        set.vector_offsets.reserve(entries.size());
+        if (seg.has_vector_blocks) set.packed_vectors.reserve(entries.size());
+    } else {
+        set.vectors.reserve(entries.size() * set.dim);
+    }
     std::vector<int64_t> row_ints(schema.columns.size(), 0);
-    scan_segment_raw(
-        path,
-        [&](uint64_t offset, uint32_t, const uint8_t* payload, size_t size) {
+    const uint64_t scanned = scan_segment_raw_range(
+        path, 0, seg.len,
+        [&](uint64_t offset, uint32_t, uint8_t flags, const uint8_t* payload, size_t size) {
             RawPayloadReader reader(payload, size);
             uint32_t op_count = reader.u32();
+            const uint8_t* dictionary = flags & kRecordFlagVectorBlock
+                ? reader.take(vector_block::dictionary_size) : nullptr;
             for (uint32_t op_index = 0; op_index < op_count; ++op_index) {
                 uint8_t kind = reader.u8();
                 int64_t pk = reader.i64();
@@ -2401,6 +2420,7 @@ bool Table::ensure_hot() {
                     fail_internal("storage corrupted: unknown op kind in hot build");
                 }
                 const uint8_t* raw_vector = nullptr;
+                size_t packed_size = 0;
                 for (size_t index = 0; index < schema.columns.size(); ++index) {
                     const ColumnType& type = schema.columns[index].type;
                     switch (type.kind) {
@@ -2413,11 +2433,12 @@ bool Table::ensure_hot() {
                             break;
                         }
                         case TypeKind::Vector: {
-                            const size_t bytes =
+                            const size_t bytes = dictionary ? reader.u32() :
                                 static_cast<size_t>(type.n) * sizeof(float);
                             const uint8_t* raw = reader.take(bytes);
                             if (index == vector_column.value()) {
                                 raw_vector = raw;
+                                if (dictionary) packed_size = bytes;
                             }
                             break;
                         }
@@ -2438,18 +2459,43 @@ bool Table::ensure_hot() {
                         set.int_columns[index]->push_back(row_ints[index]);
                     }
                 }
-                size_t vector_offset = set.vectors.size();
-                set.vectors.resize(vector_offset + set.dim);
-                std::memcpy(
-                    set.vectors.data() + vector_offset,
-                    raw_vector,
-                    static_cast<size_t>(set.dim) * sizeof(float));
+                if (set.mapped) {
+                    set.vector_offsets.push_back(
+                        static_cast<size_t>(offset + kRawRecordHeaderSize + (raw_vector - payload)));
+                    if (seg.has_vector_blocks) {
+                        set.packed_vectors.push_back({
+                            dictionary ? static_cast<size_t>(offset + kRawRecordHeaderSize + sizeof(uint32_t)) : 0,
+                            packed_size});
+                    }
+                } else {
+                    size_t vector_offset = set.vectors.size();
+                    set.vectors.resize(vector_offset + set.dim);
+                    auto* dest = reinterpret_cast<uint8_t*>(set.vectors.data() + vector_offset);
+                    if (dictionary) {
+                        vector_block::decode({raw_vector, dictionary, packed_size}, set.dim, dest);
+                    } else {
+                        std::memcpy(dest, raw_vector, set.dim * sizeof(float));
+                    }
+                }
             }
         });
+    if (scanned != seg.len || set.pks.size() != entries.size()) {
+        return false;
+    }
     if (set.pks.size() <= cache_budget / (bytes_per_row + set.dim)) {
-        try { set.quantized.build(set.vectors, set.dim); }
+        try {
+            if (set.mapped) {
+                std::vector<uint8_t> scratch;
+                set.quantized.build_mapped(set.vector_offsets.size(), set.dim,
+                    [&](size_t index) { return set.vector_bytes(index, scratch); });
+            } else {
+                set.quantized.build(set.vectors, set.dim);
+            }
+        }
         catch (const std::bad_alloc&) { /* optional accelerator */ }
     }
+    try { set.quantized.build_vnni_terms(cache_budget / 64); }
+    catch (const std::bad_alloc&) { /* optional accelerator */ }
     hot = std::move(set);
     return true;
 }
@@ -2488,6 +2534,7 @@ bool Table::ensure_hot_string_column(size_t column) {
             path,
             [&](uint64_t offset,
                 uint32_t,
+                uint8_t flags,
                 const uint8_t* payload,
                 size_t size) {
                 if (too_large) {
@@ -2495,6 +2542,8 @@ bool Table::ensure_hot_string_column(size_t column) {
                 }
                 RawPayloadReader reader(payload, size);
                 uint32_t op_count = reader.u32();
+                const bool packed = (flags & kRecordFlagVectorBlock) != 0;
+                if (packed) reader.take(vector_block::dictionary_size);
                 for (uint32_t op_index = 0; op_index < op_count; ++op_index) {
                     uint8_t kind = reader.u8();
                     int64_t pk = reader.i64();
@@ -2524,7 +2573,7 @@ bool Table::ensure_hot_string_column(size_t column) {
                                 break;
                             }
                             case TypeKind::Vector:
-                                reader.take(
+                                reader.take(packed ? reader.u32() :
                                     static_cast<size_t>(type.n) * sizeof(float));
                                 break;
                         }
@@ -2772,7 +2821,7 @@ bool Table::build_ann_index() {
                              const std::vector<int64_t>&)>& visit) {
         scan_segment_raw(
             path,
-            [&](uint64_t offset, uint32_t, const uint8_t* payload, size_t size) {
+            [&](uint64_t offset, uint32_t, uint8_t, const uint8_t* payload, size_t size) {
                 RawPayloadReader reader(payload, size);
                 uint32_t op_count = reader.u32();
                 for (uint32_t op_index = 0; op_index < op_count; ++op_index) {
@@ -3042,6 +3091,8 @@ bool Table::build_ann_index() {
 }
 
 bool Table::ensure_ann_index() {
+    // This index stores direct offsets to uncompressed vector fields.
+    if (seg.has_vector_blocks) return false;
     if (ann_budget_bytes > 0 &&
         estimate_ann_peak(*this) > ann_budget_bytes) {
         return false;
@@ -3283,6 +3334,7 @@ void Table::abort_statement_batch() {
 }
 
 void Table::compact() {
+    hot.reset();
     ann.reset();
     std::string temporary = path + ".tmp";
     int fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -3343,6 +3395,7 @@ void Table::compact() {
             found->second.share = new_length;
         }
     }
+    seg.has_vector_blocks = false;
     live_bytes = offset;
     records = std::move(new_records);
     has_stale = false;
@@ -4534,12 +4587,22 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         const exact_scan::Bound bound(hot.dim);
         auto scan_hot = [&](size_t begin, size_t end, const auto& worst, const auto& consider) {
             quantized_scan::Query quantized(hot.quantized, query, use_avx, asc);
-            const bool batch = !check_predicate && quantized.can_batch();
+            const bool tiles = !check_predicate && !selected && quantized.has_tiles();
+            const bool batch = !check_predicate && !tiles && quantized.can_batch();
             const auto row_index = [&](size_t offset) -> size_t {
                 return selected ? selected->rows[offset] : offset;
             };
             for (size_t offset = begin; offset < end;) {
                 const double threshold = worst();
+                if (tiles && offset % 16 == 0 && end - offset >= 16 &&
+                    offset < hot.quantized.tiled_rows && std::isfinite(threshold)) {
+                    const unsigned rejected = quantized.rejects_tile(offset, threshold);
+                    for (size_t lane = 0; lane < 16; ++lane) {
+                        if ((rejected & (1u << lane)) == 0) consider(offset + lane);
+                    }
+                    offset += 16;
+                    continue;
+                }
                 if (batch && end - offset >= 4 && std::isfinite(threshold)) {
                     const std::array<size_t, 4> indices{
                         row_index(offset), row_index(offset + 1),
@@ -4559,7 +4622,90 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
             }
         };
         std::vector<HotCandidate> candidates;
-        if (hot.pks.size() >= 50000) {
+        const auto deferred_exact = [&] {
+            static const bool enabled = std::getenv("MVD_DISABLE_DEFERRED_EXACT") == nullptr;
+            if (!enabled || !asc || !use_avx || keep == 0 || keep > 128 ||
+                hot.pks.size() >= 50000 || scan_count < 4 * keep) {
+                return false;
+            }
+            struct Pending {
+                size_t index;
+                float squared;
+            };
+            const size_t max_pending = std::max<size_t>(256, 8 * keep);
+            std::vector<Pending> pending;
+            pending.reserve(std::min(max_pending, scan_count));
+            std::vector<float> upper_heap;
+            upper_heap.reserve(keep);
+            std::vector<uint8_t> scratch;
+            const auto approximate = [&](size_t index) -> float {
+#if defined(__x86_64__) || defined(__i386__)
+                static const bool fuse_packed = std::getenv("MVD_DISABLE_HOT_PACKED_FUSION") == nullptr;
+                if (fuse_packed && hot.dim % 16 == 0 && !hot.packed_vectors.empty()) {
+                    const auto& packed = hot.packed_vectors[index];
+                    if (packed.size == vector_block::packed_prefix(hot.dim)) {
+                        const auto* base = hot.mapped.get();
+                        const vector_block::View view{base + hot.vector_offsets[index],
+                            base + packed.dictionary_offset, packed.size};
+                        const float squared = vector_block::squared_dense(view, query.data(), hot.dim);
+                        if (!std::isnan(squared)) return squared;
+                    }
+                }
+#endif
+                const uint8_t* row = hot.vector_bytes(index, scratch);
+                return l2_sq_raw(row, query.data(), hot.dim, use_avx);
+            };
+            double upper = std::numeric_limits<double>::infinity();
+            bool fallback = false;
+            scan_hot(0, scan_count, [&] { return upper; }, [&](size_t index) {
+                if (fallback) return;
+                const float squared = approximate(index);
+                if (bound.rejects(squared, upper, true)) return;
+                if (!std::isfinite(squared) || pending.size() == max_pending) {
+                    fallback = true;
+                    return;
+                }
+                pending.push_back({index, squared});
+                // An upper bound on K rows gives an upper bound on the kth
+                // distance. Since the envelope is monotone, order its inputs.
+                if (upper_heap.size() < keep) {
+                    upper_heap.push_back(squared);
+                    std::push_heap(upper_heap.begin(), upper_heap.end());
+                } else if (squared < upper_heap.front()) {
+                    std::pop_heap(upper_heap.begin(), upper_heap.end());
+                    upper_heap.back() = squared;
+                    std::push_heap(upper_heap.begin(), upper_heap.end());
+                } else {
+                    return;
+                }
+                if (upper_heap.size() == keep) upper = bound.upper_distance(upper_heap.front());
+            });
+            // Dense ties or a nonfinite screen result have the same exact
+            // fallback as before, with no truncation of possible winners.
+            if (fallback) return false;
+            const HotCompare compare{true};
+            candidates.reserve(std::min(keep, pending.size()));
+            for (const Pending& entry : pending) {
+                const double threshold = candidates.size() == keep
+                    ? std::min(upper, candidates.front().distance) : upper;
+                if (bound.rejects(entry.squared, threshold, true)) continue;
+                const uint8_t* row = hot.vector_bytes(entry.index, scratch);
+                HotCandidate candidate{l2_distance_raw(row, query.data(), hot.dim),
+                                       hot.pks[entry.index], entry.index};
+                if (candidates.size() < keep) {
+                    candidates.push_back(candidate);
+                    std::push_heap(candidates.begin(), candidates.end(), compare);
+                } else if (compare(candidate, candidates.front())) {
+                    std::pop_heap(candidates.begin(), candidates.end(), compare);
+                    candidates.back() = candidate;
+                    std::push_heap(candidates.begin(), candidates.end(), compare);
+                }
+            }
+            return true;
+        };
+        if (deferred_exact()) {
+            // The heap is ready for exact ordering and projection below.
+        } else if (hot.pks.size() >= 50000) {
             // Large vector sets use bounded per-worker heaps instead of an
             // all-candidate array, and split the scan across workers.
             using HotHeap = std::priority_queue<
@@ -4570,18 +4716,18 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                                  size_t end,
                                  std::vector<HotCandidate>& output) {
                 HotHeap heap(HotCompare{asc});
+                std::vector<uint8_t> scratch;
                 const auto worst = [&] {
                     return heap.size() == keep ? heap.top().distance
                         : std::numeric_limits<double>::infinity();
                 };
                 scan_hot(begin, end, worst, [&](size_t index) {
-                    const float* row = hot.vectors.data() + index * hot.dim;
-                    float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
-                                             query.data(), hot.dim, use_avx);
+                    const uint8_t* row = hot.vector_bytes(index, scratch);
+                    float approx = l2_sq_raw(row, query.data(), hot.dim, use_avx);
                     if (heap.size() == keep &&
                         bound.rejects(approx, heap.top().distance, asc)) return;
                     HotCandidate candidate{
-                        l2_distance_ptr(row, query.data(), hot.dim), hot.pks[index], index};
+                        l2_distance_raw(row, query.data(), hot.dim), hot.pks[index], index};
                     if (heap.size() < keep) {
                         heap.push(candidate);
                     } else if (HotCompare{asc}(candidate, heap.top())) {
@@ -4641,18 +4787,18 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         } else {
             candidates.reserve(std::min(keep, scan_count));
             const HotCompare compare{asc};
+            std::vector<uint8_t> scratch;
             const auto worst = [&] {
                 return candidates.size() == keep ? candidates.front().distance
                     : std::numeric_limits<double>::infinity();
             };
             scan_hot(0, scan_count, worst, [&](size_t index) {
-                const float* row = hot.vectors.data() + index * hot.dim;
-                float approx = l2_sq_raw(reinterpret_cast<const uint8_t*>(row),
-                                         query.data(), hot.dim, use_avx);
+                const uint8_t* row = hot.vector_bytes(index, scratch);
+                float approx = l2_sq_raw(row, query.data(), hot.dim, use_avx);
                 if (candidates.size() == keep &&
                     bound.rejects(approx, candidates.front().distance, asc)) return;
                 HotCandidate candidate{
-                    l2_distance_ptr(row, query.data(), hot.dim), hot.pks[index], index};
+                    l2_distance_raw(row, query.data(), hot.dim), hot.pks[index], index};
                 if (candidates.size() < keep) {
                     candidates.push_back(candidate);
                     std::push_heap(candidates.begin(), candidates.end(), compare);
@@ -4703,18 +4849,17 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
             }
         }
         if (direct_projection) {
+            std::vector<uint8_t> scratch;
             for (const HotFinal& item : finals) {
                 std::vector<OutputValue> values;
                 values.reserve(projections.size());
                 for (const Projection& projection : projections) {
                     if (projection.kind == Projection::Kind::Distance) {
-                        const float* row =
-                            hot.vectors.data() + item.index * hot.dim;
                         values.push_back(OutputValue::floating(
                             projection.query == *distance_target->query
                                 ? item.distance
-                                : l2_distance_ptr(
-                                      row, projection.query.data(), hot.dim)));
+                                : l2_distance_raw(hot.vector_bytes(item.index, scratch),
+                                                  projection.query.data(), hot.dim)));
                     } else {
                         values.push_back(OutputValue::integer(
                             (*hot.int_columns[projection.column])[item.index]));
@@ -4753,6 +4898,7 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         const bool use_avx = avx2_available();
         const size_t keep = limit;
         const exact_scan::Bound bound(dim);
+        static const bool packed_screen = std::getenv("MVD_DISABLE_PACKED_SCREEN") == nullptr;
         struct StreamCandidate {
             double exact;
             int64_t pk;
@@ -4779,13 +4925,17 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                 return clause.value.kind == Value::Kind::Str;
             });
         auto process_payload = [&](uint64_t offset,
+                                   uint8_t flags,
                                    const uint8_t* payload,
                                    size_t size,
                                    StreamHeap& heap,
                                    std::vector<int64_t>& int_values,
-                                   std::vector<std::string_view>& string_values) {
+                                   std::vector<std::string_view>& string_values,
+                                   std::vector<uint8_t>& scratch) {
             RawPayloadReader reader(payload, size);
             uint32_t op_count = reader.u32();
+            const uint8_t* dictionary = flags & kRecordFlagVectorBlock
+                ? reader.take(vector_block::dictionary_size) : nullptr;
             for (uint32_t op_index = 0; op_index < op_count; ++op_index) {
                 uint8_t kind = reader.u8();
                 int64_t pk = reader.i64();
@@ -4797,6 +4947,7 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                     fail_internal("storage corrupted: unknown raw op kind");
                 }
                 const uint8_t* raw_vector = nullptr;
+                size_t packed_size = 0;
                 for (size_t column = 0; column < schema.columns.size(); ++column) {
                     const ColumnType& type = schema.columns[column].type;
                     switch (type.kind) {
@@ -4813,11 +4964,12 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                             break;
                         }
                         case TypeKind::Vector: {
-                            const size_t bytes =
+                            const size_t bytes = dictionary ? reader.u32() :
                                 static_cast<size_t>(type.n) * sizeof(float);
                             const uint8_t* raw = reader.take(bytes);
                             if (column == vector_column) {
                                 raw_vector = raw;
+                                if (dictionary) packed_size = bytes;
                             }
                             break;
                         }
@@ -4846,6 +4998,21 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
                 if (raw_vector == nullptr) {
                     fail_internal("storage corrupted: missing raw vector");
                 }
+                if (dictionary) {
+#if defined(__x86_64__) || defined(__i386__)
+                    if (packed_screen && use_avx && asc && dim % 16 == 0 &&
+                        packed_size == vector_block::packed_prefix(dim) && heap.size() == keep &&
+                        bound.relative < 0.25) {
+                        const double worst = heap.top().exact;
+                        const double threshold = worst * worst;
+                        const double cutoff = threshold + threshold * bound.relative + bound.absolute;
+                        if (vector_block::screen_dense({raw_vector, dictionary, packed_size}, query, dim, cutoff)) continue;
+                    }
+#endif
+                    scratch.resize(dim * sizeof(float));
+                    vector_block::decode({raw_vector, dictionary, packed_size}, dim, scratch.data());
+                    raw_vector = scratch.data();
+                }
                 const float approx = l2_sq_raw(raw_vector, query, dim, use_avx);
                 if (heap.size() == keep &&
                     bound.rejects(approx, heap.top().exact, asc)) continue;
@@ -4861,15 +5028,17 @@ Response Database::select(const Stmt& statement, std::optional<Txn>& txn) {
         auto scan_range = [&](uint64_t start, uint64_t end, StreamHeap& heap) {
             std::vector<int64_t> int_values(schema.columns.size(), 0);
             std::vector<std::string_view> string_values(filter_strings ? schema.columns.size() : 0);
+            std::vector<uint8_t> scratch;
             scan_segment_raw_range(
                 table.path,
                 start,
                 end,
                 [&](uint64_t offset,
                     uint32_t,
+                    uint8_t flags,
                     const uint8_t* payload,
                     size_t size) {
-                    process_payload(offset, payload, size, heap, int_values, string_values);
+                    process_payload(offset, flags, payload, size, heap, int_values, string_values, scratch);
                 });
         };
         size_t requested_threads = threads;

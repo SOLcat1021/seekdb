@@ -81,7 +81,7 @@ const char* token_name(TK kind) {
     return "token";
 }
 
-std::vector<Token> tokenize(const std::string& input) {
+std::vector<Token> tokenize(std::string_view input) {
     std::vector<Token> tokens;
     size_t index = 0;
     while (index < input.size()) {
@@ -225,7 +225,7 @@ std::vector<Token> tokenize(const std::string& input) {
                     break;
                 }
             }
-            tokens.push_back(Token{TK::Num, input.substr(start, index - start)});
+            tokens.push_back(Token{TK::Num, std::string(input.substr(start, index - start))});
             continue;
         }
         if (std::isalpha(ch) || ch == '_' || ch == '$') {
@@ -238,7 +238,7 @@ std::vector<Token> tokenize(const std::string& input) {
                     break;
                 }
             }
-            tokens.push_back(Token{TK::Ident, input.substr(start, index - start)});
+            tokens.push_back(Token{TK::Ident, std::string(input.substr(start, index - start))});
             continue;
         }
         switch (ch) {
@@ -1048,7 +1048,7 @@ Literal Literal::vector(std::vector<double> values) {
     return literal;
 }
 
-Stmt parse_statement(const std::string& input) {
+Stmt parse_statement(std::string_view input) {
     std::vector<Token> tokens = tokenize(input);
     if (tokens.empty()) {
         fail_syntax("empty statement");
